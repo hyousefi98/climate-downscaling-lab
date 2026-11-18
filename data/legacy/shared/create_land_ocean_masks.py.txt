@@ -1,0 +1,480 @@
+# %%
+# ==============================================================================
+# Create Land/Ocean Masks for AORC Reference Grids
+# ==============================================================================
+import xarray as xr
+import numpy as np
+from pathlib import Path
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from cartopy.io import shapereader
+from shapely.geometry import Point
+import matplotlib.pyplot as plt
+
+# %%
+# ==============================================================================
+# STEP 1: Load Reference Grids
+# ==============================================================================
+print("Loading reference grids...")
+
+REF_3KM_PATH = Path("/home/hyousefi/data/AORC/aorc_reference_grids/aorc_refgrid_3km.nc")
+REF_4KM_PATH = Path("/home/hyousefi/data/AORC/aorc_reference_grids/aorc_refgrid_4km.nc")
+
+# Load the reference grids
+ref_3km = xr.open_dataset(REF_3KM_PATH)
+ref_4km = xr.open_dataset(REF_4KM_PATH)
+
+print("\n3km Reference Grid:")
+print(ref_3km)
+print(f"  Shape: {ref_3km.dims}")
+
+print("\n4km Reference Grid:")
+print(ref_4km)
+print(f"  Shape: {ref_4km.dims}")
+
+# %%
+# ==============================================================================
+# STEP 2: Extract Lat/Lon Coordinates
+# ==============================================================================
+
+def get_lat_lon_from_dataset(ds):
+    """Extract lat/lon arrays from reference grid dataset."""
+
+    # Check for 2D lat/lon
+    if 'LAT2D' in ds and 'LON2D' in ds:
+        lat_2d = ds['LAT2D'].values
+        lon_2d = ds['LON2D'].values
+        print(f"  Using LAT2D/LON2D (shape: {lat_2d.shape})")
+    elif 'lat' in ds.coords and 'lon' in ds.coords:
+        lat = ds.coords['lat'].values
+        lon = ds.coords['lon'].values
+
+        # If 1D, create 2D meshgrid
+        if lat.ndim == 1 and lon.ndim == 1:
+            lon_2d, lat_2d = np.meshgrid(lon, lat)
+            print(f"  Created meshgrid from 1D lat/lon (shape: {lat_2d.shape})")
+        else:
+            lat_2d = lat
+            lon_2d = lon
+            print(f"  Using 2D lat/lon (shape: {lat_2d.shape})")
+    else:
+        raise ValueError("Could not find lat/lon coordinates in dataset")
+
+    return lat_2d, lon_2d
+
+print("\nExtracting coordinates from 3km grid:")
+lat_3km, lon_3km = get_lat_lon_from_dataset(ref_3km)
+
+print("\nExtracting coordinates from 4km grid:")
+lat_4km, lon_4km = get_lat_lon_from_dataset(ref_4km)
+
+# %%
+# ==============================================================================
+# STEP 3: Create Land/Ocean Mask Using Cartopy
+# ==============================================================================
+
+def create_land_mask_cartopy(lat_2d, lon_2d, resolution='10m'):
+    """
+    Create land/ocean mask using Cartopy Natural Earth features.
+
+    Parameters:
+    -----------
+    lat_2d : 2D array
+        Latitude coordinates
+    lon_2d : 2D array
+        Longitude coordinates
+    resolution : str
+        Natural Earth resolution ('10m', '50m', or '110m')
+
+    Returns:
+    --------
+    mask : 2D array
+        Boolean mask where True = Land, False = Ocean
+    """
+    print(f"\nCreating land mask using Natural Earth {resolution} resolution...")
+    print(f"  Grid shape: {lat_2d.shape}")
+    print(f"  Total points: {lat_2d.size:,}")
+
+    # Load Natural Earth land geometries
+    land_shp = shapereader.natural_earth(resolution=resolution,
+                                         category='physical',
+                                         name='land')
+    land_reader = shapereader.Reader(land_shp)
+    land_geoms = list(land_reader.geometries())
+
+    print(f"  Loaded {len(land_geoms)} land polygons")
+
+    # Create mask array
+    mask = np.zeros(lat_2d.shape, dtype=bool)
+
+    # Check each point
+    total_points = lat_2d.size
+    land_count = 0
+
+    print("  Processing grid points...")
+    for i in range(lat_2d.shape[0]):
+        if i % 10 == 0:  # Progress update every 10 rows
+            progress = (i * lat_2d.shape[1]) / total_points * 100
+            print(f"    Progress: {progress:.1f}% ({land_count:,} land points so far)")
+
+        for j in range(lat_2d.shape[1]):
+            point = Point(lon_2d[i, j], lat_2d[i, j])
+
+            # Check if point is in any land polygon
+            for geom in land_geoms:
+                if geom.contains(point):
+                    mask[i, j] = True
+                    land_count += 1
+                    break
+
+    ocean_count = total_points - land_count
+    print(f"\n  Mask Statistics (before expansion):")
+    print(f"    Total points: {total_points:,}")
+    print(f"    Land points:  {land_count:,} ({land_count/total_points*100:.2f}%)")
+    print(f"    Ocean points: {ocean_count:,} ({ocean_count/total_points*100:.2f}%)")
+
+    # Expand ocean by dilating the ocean mask (or equivalently, eroding the land mask)
+    # This adds 1 cell buffer around ocean boundaries
+    print("\n  Expanding ocean mask by 1 pixel (coastal buffer)...")
+    from scipy.ndimage import binary_dilation
+
+    # Create ocean mask (inverse of land)
+    ocean_mask = ~mask
+
+    # Dilate ocean: expands ocean areas by 1 pixel into land
+    expanded_ocean_mask = binary_dilation(ocean_mask, iterations=1)
+
+    # Convert back to land mask
+    final_land_mask = ~expanded_ocean_mask
+
+    # Calculate new statistics
+    final_land_count = final_land_mask.sum()
+    final_ocean_count = total_points - final_land_count
+    coastal_cells_added_to_ocean = land_count - final_land_count
+
+    print(f"  Mask Statistics (after expansion):")
+    print(f"    Land points:  {final_land_count:,} ({final_land_count/total_points*100:.2f}%)")
+    print(f"    Ocean points: {final_ocean_count:,} ({final_ocean_count/total_points*100:.2f}%)")
+    print(f"    Coastal cells added to ocean: {coastal_cells_added_to_ocean:,}")
+
+    return final_land_mask
+
+# Create masks for both grids
+print("\n" + "="*80)
+print("Creating 3km land mask...")
+print("="*80)
+land_mask_3km = create_land_mask_cartopy(lat_3km, lon_3km, resolution='10m')
+
+print("\n" + "="*80)
+print("Creating 4km land mask...")
+print("="*80)
+land_mask_4km = create_land_mask_cartopy(lat_4km, lon_4km, resolution='10m')
+
+# %%
+# ==============================================================================
+# STEP 4: Visualize the Masks
+# ==============================================================================
+print("\nCreating visualizations...")
+
+fig, axes = plt.subplots(1, 2, figsize=(16, 6), constrained_layout=True)
+
+# Custom colormap: Red=Ocean (0), Green=Land (1)
+from matplotlib.colors import ListedColormap
+colors = ['red', 'green']
+cmap = ListedColormap(colors)
+
+# Plot 3km mask
+ax1 = axes[0]
+im1 = ax1.pcolormesh(lon_3km, lat_3km, land_mask_3km.astype(int),
+                     cmap=cmap, alpha=0.8, shading='auto')
+ax1.set_title('3km Grid Land/Ocean Mask\n(Green=Land, Red=Ocean)',
+             fontsize=12, fontweight='bold')
+ax1.set_xlabel('Longitude')
+ax1.set_ylabel('Latitude')
+ax1.set_aspect('equal')
+
+# Plot 4km mask
+ax2 = axes[1]
+im2 = ax2.pcolormesh(lon_4km, lat_4km, land_mask_4km.astype(int),
+                     cmap=cmap, alpha=0.8, shading='auto')
+ax2.set_title('4km Grid Land/Ocean Mask\n(Green=Land, Red=Ocean)',
+             fontsize=12, fontweight='bold')
+ax2.set_xlabel('Longitude')
+ax2.set_ylabel('Latitude')
+ax2.set_aspect('equal')
+
+# Add shared colorbar
+cbar = fig.colorbar(im2, ax=axes, orientation='horizontal', fraction=0.046, pad=0.08)
+cbar.set_label('0 = Ocean, 1 = Land', fontsize=11)
+cbar.set_ticks([0.25, 0.75])
+cbar.set_ticklabels(['Ocean', 'Land'])
+
+plt.suptitle('AORC Reference Grid Land/Ocean Masks', fontsize=14, fontweight='bold')
+plt.show()
+
+# %%
+# ==============================================================================
+# STEP 5: Save Masks to NetCDF Files
+# ==============================================================================
+print("\nSaving masks to NetCDF files...")
+
+# Create output directory
+output_dir = Path("/home/hyousefi/data/AORC/aorc_reference_grids")
+output_dir.mkdir(parents=True, exist_ok=True)
+
+# Save 3km mask
+output_3km = output_dir / "aorc_land_mask_3km.nc"
+print(f"\nSaving 3km mask to: {output_3km}")
+
+ds_3km = xr.Dataset(
+    {
+        'LANDMASK': (ref_3km.dims.keys(), land_mask_3km.astype(np.int8),
+                    {'long_name': 'Land/Ocean Mask',
+                     'description': 'Binary mask where 1=Land, 0=Ocean/Water',
+                     'units': 'dimensionless',
+                     'source': 'Natural Earth 10m land polygons',
+                     'grid': '3km AORC reference grid'}),
+        'LAT2D': (ref_3km.dims.keys(), lat_3km,
+                 {'long_name': 'Latitude', 'units': 'degrees_north'}),
+        'LON2D': (ref_3km.dims.keys(), lon_3km,
+                 {'long_name': 'Longitude', 'units': 'degrees_east'})
+    },
+    attrs={
+        'title': 'AORC 3km Reference Grid Land/Ocean Mask',
+        'description': 'Binary land/ocean mask regridded to AORC 3km reference grid',
+        'source': 'Natural Earth 10m land polygons via Cartopy',
+        'created': str(np.datetime64('now')),
+        'grid_reference': str(REF_3KM_PATH)
+    }
+)
+ds_3km.to_netcdf(output_3km)
+print(f"  Saved successfully!")
+
+# Save 4km mask
+output_4km = output_dir / "aorc_land_mask_4km.nc"
+print(f"\nSaving 4km mask to: {output_4km}")
+
+ds_4km = xr.Dataset(
+    {
+        'LANDMASK': (ref_4km.dims.keys(), land_mask_4km.astype(np.int8),
+                    {'long_name': 'Land/Ocean Mask',
+                     'description': 'Binary mask where 1=Land, 0=Ocean/Water',
+                     'units': 'dimensionless',
+                     'source': 'Natural Earth 10m land polygons',
+                     'grid': '4km AORC reference grid'}),
+        'LAT2D': (ref_4km.dims.keys(), lat_4km,
+                 {'long_name': 'Latitude', 'units': 'degrees_north'}),
+        'LON2D': (ref_4km.dims.keys(), lon_4km,
+                 {'long_name': 'Longitude', 'units': 'degrees_east'})
+    },
+    attrs={
+        'title': 'AORC 4km Reference Grid Land/Ocean Mask',
+        'description': 'Binary land/ocean mask regridded to AORC 4km reference grid',
+        'source': 'Natural Earth 10m land polygons via Cartopy',
+        'created': str(np.datetime64('now')),
+        'grid_reference': str(REF_4KM_PATH)
+    }
+)
+ds_4km.to_netcdf(output_4km)
+print(f"  Saved successfully!")
+
+# %%
+# ==============================================================================
+# STEP 6: Verify Saved Files
+# ==============================================================================
+print("\n" + "="*80)
+print("Verification")
+print("="*80)
+
+# Load and verify 3km mask
+print(f"\n3km Mask File: {output_3km}")
+verify_3km = xr.open_dataset(output_3km)
+print(verify_3km)
+print(f"\nLANDMASK values: min={verify_3km['LANDMASK'].min().values}, max={verify_3km['LANDMASK'].max().values}")
+print(f"Land percentage: {(verify_3km['LANDMASK'].sum() / verify_3km['LANDMASK'].size * 100).values:.2f}%")
+
+# Load and verify 4km mask
+print(f"\n4km Mask File: {output_4km}")
+verify_4km = xr.open_dataset(output_4km)
+print(verify_4km)
+print(f"\nLANDMASK values: min={verify_4km['LANDMASK'].min().values}, max={verify_4km['LANDMASK'].max().values}")
+print(f"Land percentage: {(verify_4km['LANDMASK'].sum() / verify_4km['LANDMASK'].size * 100).values:.2f}%")
+
+print("\n" + "="*80)
+print("DONE! Masks saved successfully.")
+print("="*80)
+print(f"\nOutput files:")
+print(f"  3km: {output_3km}")
+print(f"  4km: {output_4km}")
+
+# %%
+# ==============================================================================
+# STEP 7: Read and Verify the Saved Masks with Detailed Visualization
+# ==============================================================================
+print("\n" + "="*80)
+print("STEP 7: Reading and Plotting Saved Masks for Verification")
+print("="*80)
+
+# Read the saved mask files
+mask_3km_file = xr.open_dataset(output_3km)
+mask_4km_file = xr.open_dataset(output_4km)
+
+print("\n3km Mask Dataset:")
+print(mask_3km_file)
+
+print("\n4km Mask Dataset:")
+print(mask_4km_file)
+
+# Create comprehensive visualization
+fig = plt.figure(figsize=(18, 12))
+
+# Custom colormap: Red=Ocean (0), Green=Land (1)
+from matplotlib.colors import ListedColormap
+colors = ['red', 'green']
+cmap = ListedColormap(colors)
+
+# Plot 1: 3km mask
+ax1 = fig.add_subplot(2, 2, 1)
+im1 = mask_3km_file['LANDMASK'].plot(
+    ax=ax1,
+    cmap=cmap,
+    add_colorbar=False,
+    add_labels=False
+)
+ax1.set_title('3km Land Mask\n(Green=Land, Red=Ocean)',
+             fontsize=12, fontweight='bold')
+ax1.set_xlabel('Grid X')
+ax1.set_ylabel('Grid Y')
+ax1.set_aspect('equal')
+
+# Add text with statistics
+land_count_3km = int(mask_3km_file['LANDMASK'].sum().values)
+total_3km = int(mask_3km_file['LANDMASK'].size)
+ocean_count_3km = total_3km - land_count_3km
+ax1.text(0.02, 0.98, f'Land: {land_count_3km:,} ({land_count_3km/total_3km*100:.1f}%)\nOcean: {ocean_count_3km:,} ({ocean_count_3km/total_3km*100:.1f}%)',
+        transform=ax1.transAxes, fontsize=9, verticalalignment='top',
+        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+# Plot 2: 4km mask
+ax2 = fig.add_subplot(2, 2, 2)
+im2 = mask_4km_file['LANDMASK'].plot(
+    ax=ax2,
+    cmap=cmap,
+    add_colorbar=False,
+    add_labels=False
+)
+ax2.set_title('4km Land Mask\n(Green=Land, Red=Ocean)',
+             fontsize=12, fontweight='bold')
+ax2.set_xlabel('Grid X')
+ax2.set_ylabel('Grid Y')
+ax2.set_aspect('equal')
+
+# Add text with statistics
+land_count_4km = int(mask_4km_file['LANDMASK'].sum().values)
+total_4km = int(mask_4km_file['LANDMASK'].size)
+ocean_count_4km = total_4km - land_count_4km
+ax2.text(0.02, 0.98, f'Land: {land_count_4km:,} ({land_count_4km/total_4km*100:.1f}%)\nOcean: {ocean_count_4km:,} ({ocean_count_4km/total_4km*100:.1f}%)',
+        transform=ax2.transAxes, fontsize=9, verticalalignment='top',
+        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+# Plot 3: 3km mask with geographic coordinates (if available)
+ax3 = fig.add_subplot(2, 2, 3, projection=ccrs.PlateCarree())
+
+try:
+    lat_3km_verify = mask_3km_file['LAT2D'].values
+    lon_3km_verify = mask_3km_file['LON2D'].values
+
+    im3 = ax3.pcolormesh(lon_3km_verify, lat_3km_verify,
+                         mask_3km_file['LANDMASK'].values,
+                         cmap=cmap, alpha=0.8,
+                         transform=ccrs.PlateCarree(),
+                         shading='auto')
+
+    extent_3km = [lon_3km_verify.min(), lon_3km_verify.max(),
+                  lat_3km_verify.min(), lat_3km_verify.max()]
+    ax3.set_extent(extent_3km, crs=ccrs.PlateCarree())
+
+    # Add geographic features for reference
+    ax3.add_feature(cfeature.COASTLINE, linewidth=0.5, edgecolor='black', zorder=2)
+    ax3.add_feature(cfeature.STATES, linewidth=0.3, edgecolor='gray', zorder=2)
+    ax3.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle='--', edgecolor='black', zorder=2)
+
+    ax3.gridlines(draw_labels=True, linewidth=0.3, alpha=0.5)
+    ax3.set_title('3km Mask (Geographic Coordinates)\nwith Coastline Overlay',
+                 fontsize=12, fontweight='bold')
+except Exception as e:
+    ax3.text(0.5, 0.5, f'Error plotting geographic view:\n{str(e)}',
+            ha='center', va='center', transform=ax3.transAxes)
+
+# Plot 4: 4km mask with geographic coordinates (if available)
+ax4 = fig.add_subplot(2, 2, 4, projection=ccrs.PlateCarree())
+
+try:
+    lat_4km_verify = mask_4km_file['LAT2D'].values
+    lon_4km_verify = mask_4km_file['LON2D'].values
+
+    im4 = ax4.pcolormesh(lon_4km_verify, lat_4km_verify,
+                         mask_4km_file['LANDMASK'].values,
+                         cmap=cmap, alpha=0.8,
+                         transform=ccrs.PlateCarree(),
+                         shading='auto')
+
+    extent_4km = [lon_4km_verify.min(), lon_4km_verify.max(),
+                  lat_4km_verify.min(), lat_4km_verify.max()]
+    ax4.set_extent(extent_4km, crs=ccrs.PlateCarree())
+
+    # Add geographic features for reference
+    ax4.add_feature(cfeature.COASTLINE, linewidth=0.5, edgecolor='black', zorder=2)
+    ax4.add_feature(cfeature.STATES, linewidth=0.3, edgecolor='gray', zorder=2)
+    ax4.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle='--', edgecolor='black', zorder=2)
+
+    ax4.gridlines(draw_labels=True, linewidth=0.3, alpha=0.5)
+    ax4.set_title('4km Mask (Geographic Coordinates)\nwith Coastline Overlay',
+                 fontsize=12, fontweight='bold')
+except Exception as e:
+    ax4.text(0.5, 0.5, f'Error plotting geographic view:\n{str(e)}',
+            ha='center', va='center', transform=ax4.transAxes)
+
+# Add shared colorbar
+cbar = fig.colorbar(im2, ax=[ax1, ax2, ax3, ax4],
+                   orientation='horizontal', fraction=0.03, pad=0.08)
+cbar.set_label('LANDMASK: 0 = Ocean/Water, 1 = Land', fontsize=11, fontweight='bold')
+cbar.set_ticks([0.25, 0.75])
+cbar.set_ticklabels(['Ocean', 'Land'])
+
+plt.suptitle('Verification of Saved Land/Ocean Masks\n(Compare with coastlines to verify accuracy)',
+             fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.show()
+
+# Print detailed statistics
+print("\n" + "="*80)
+print("Mask Statistics Summary")
+print("="*80)
+
+print(f"\n3km Mask ({output_3km.name}):")
+print(f"  Grid shape: {mask_3km_file['LANDMASK'].shape}")
+print(f"  Total cells: {total_3km:,}")
+print(f"  Land cells: {land_count_3km:,} ({land_count_3km/total_3km*100:.2f}%)")
+print(f"  Ocean cells: {ocean_count_3km:,} ({ocean_count_3km/total_3km*100:.2f}%)")
+print(f"  Lat range: [{mask_3km_file['LAT2D'].min().values:.2f}, {mask_3km_file['LAT2D'].max().values:.2f}]")
+print(f"  Lon range: [{mask_3km_file['LON2D'].min().values:.2f}, {mask_3km_file['LON2D'].max().values:.2f}]")
+
+print(f"\n4km Mask ({output_4km.name}):")
+print(f"  Grid shape: {mask_4km_file['LANDMASK'].shape}")
+print(f"  Total cells: {total_4km:,}")
+print(f"  Land cells: {land_count_4km:,} ({land_count_4km/total_4km*100:.2f}%)")
+print(f"  Ocean cells: {ocean_count_4km:,} ({ocean_count_4km/total_4km*100:.2f}%)")
+print(f"  Lat range: [{mask_4km_file['LAT2D'].min().values:.2f}, {mask_4km_file['LAT2D'].max().values:.2f}]")
+print(f"  Lon range: [{mask_4km_file['LON2D'].min().values:.2f}, {mask_4km_file['LON2D'].max().values:.2f}]")
+
+print("\n" + "="*80)
+print("✓ Verification complete! Check the plots above.")
+print("  The masks should align with coastlines in the geographic plots.")
+print("="*80)
+
+# Close datasets
+mask_3km_file.close()
+mask_4km_file.close()
+
+# %%

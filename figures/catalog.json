@@ -1,0 +1,50 @@
+{
+  "status": "Code-only provenance; output figures and numeric research results are not included.",
+  "figures": {
+    "1": {
+      "generator": "figures/design.py",
+      "status": "Reconstructed diagram; original editable source was not recovered."
+    },
+    "2": {
+      "generator": "figures/historical/wrf/plot_selected_times_paper_grid.py",
+      "selection": "Retrospective maximum precipitation KGE, first on tie; not operational ensemble skill."
+    },
+    "3": {
+      "calculation": "figures/historical/wrf/plot_precip_fss_prob.py",
+      "renderer": "figures/historical/wrf/paper/plot_fss_journal.py"
+    },
+    "4": {
+      "calculation": "figures/historical/era5_conus404/plot_precip_fss_prob_conus404.py",
+      "renderer": "figures/historical/wrf/paper/plot_fss_journal.py",
+      "note": "Renderer is reused; pass ERA5/CONUS404 CSV and labels explicitly."
+    },
+    "5": {
+      "generator": "figures/historical/era5_conus404/plot_selected_times_paper_grid.py",
+      "selection": "Retrospective maximum precipitation KGE."
+    },
+    "6": {
+      "generator": "figures/historical/era5_conus404/paper/code/plot_qq_q95_spectra_journal.py"
+    },
+    "S1": {
+      "generator": "figures/historical/wrf/inference/plot_single_sample_wrf_time.py",
+      "selection": "Retrospective minimum precipitation RMSE."
+    },
+    "S2": {
+      "generator": "figures/historical/wrf/paper/plot_spectra_all_variables_journal.py"
+    },
+    "S3": {
+      "generator": "figures/historical/era5_conus404/paper/code/plot_spectra_all_variables_journal.py",
+      "note": "Original submitted S3 image duplicated WRF S2 despite ERA5 caption. This entry selects the intended ERA5 generator and does not claim exact reproduction of that duplicate."
+    },
+    "S4": {
+      "generator": "figures/historical/era5_conus404/inference/plot_single_sample_wrf_time.py",
+      "selection": "Retrospective minimum precipitation RMSE."
+    },
+    "S5": {
+      "calculation": "evaluation/percentile_fss.py",
+      "renderer": "figures/percentile.py",
+      "note": "Portable training-only product-relative quantile FSS; algorithmic changes and original source hashes in evaluation/source_manifest.json."
+    }
+  },
+  "inputs": "Historical scripts may contain inherited experiment defaults; explicitly supply all NetCDF, CSV, mask and output paths. See each --help. Corrected data and valid units are caller responsibilities."
+}

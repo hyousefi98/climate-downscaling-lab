@@ -1,0 +1,18 @@
+Downscaling Gap
+Research code assembled for Hossein Yousefi Sohi and collaborators.
+
+This repository includes and adapts CorrDiff example code and other components
+from NVIDIA PhysicsNeMo. Their original copyright and Apache-2.0 notices are
+retained in the source files. The bundled PhysicsNeMo patch must be applied to
+the exact upstream commit recorded in patches/physicsnemo-source.json.
+
+The code license does not license third-party datasets or model checkpoints.
+Data access remains subject to the source providers' conditions. No datasets,
+model weights, prediction arrays, manuscript files, or research results are
+included in this repository.
+
+Repository-specific changes include portable paths, common workflow interfaces,
+explicit scientific processing policies, corrected missing-data handling,
+verification tools, and automated tests. Historical variants are identified
+separately; their presence is not a claim that known processing defects are
+scientifically valid or that all historical checkpoints can be recovered.

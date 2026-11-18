@@ -1,0 +1,79 @@
+# %%
+# ==============================================================================
+# PERMANENT FIX: WRF TIME & ATTRIBUTES
+# ==============================================================================
+import zarr
+import numpy as np
+from pathlib import Path
+
+BASE_DIR = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+
+WRF_FILES = [
+    "wrf_3km_on_aorc_3km_2000_2012.zarr",
+    "wrf_12km_on_aorc_3km_2000_2012.zarr"
+]
+
+def fix_wrf_zarr_permanently(filename):
+    path = BASE_DIR / filename
+    if not path.exists():
+        print(f"⚠️ Missing: {filename}")
+        return
+
+    print(f"🔧 Repairing {filename}...")
+    
+    # Open file in Read/Write mode
+    root = zarr.open_group(str(path), mode='r+')
+    
+    # 1. READ MASTER TIME (From Root)
+    if 'time' not in root:
+        print("   ❌ Critical: No 'time' found in root!")
+        return
+
+    master_time_arr = root['time']
+    time_data = master_time_arr[:]  # Load actual numpy data
+    
+    # 2. DEFINE CORRECT ATTRIBUTES
+    # This is the "Magic Fix". Without this, Xarray assumes nanoseconds.
+    time_attrs = {
+        "_ARRAY_DIMENSIONS": ["time"],
+        "units": "seconds since 1970-01-01",
+        "calendar": "proleptic_gregorian"
+    }
+
+    print(f"   Root Time: {len(time_data)} steps")
+
+    # 3. FIX ROOT TIME ATTRIBUTES (Just in case)
+    master_time_arr.attrs.update(time_attrs)
+
+    # 4. FIX SUBGROUP TIME (Inside 'wrf' folder)
+    if 'wrf' in root:
+        subgroup = root['wrf']
+        
+        # Delete old/bad time if it exists
+        if 'time' in subgroup:
+            del subgroup['time']
+            print("   Deleted old subgroup time.")
+
+        # Create new time dataset in subgroup
+        # We use the chunks from the root time (usually the full length for 1D time)
+        new_time = subgroup.create_dataset(
+            'time',
+            data=time_data,
+            shape=time_data.shape,
+            chunks=master_time_arr.chunks, 
+            dtype=time_data.dtype,
+            overwrite=True
+        )
+        
+        # Apply attributes to the new dataset
+        new_time.attrs.update(time_attrs)
+        print("   Created new subgroup time with correct 'seconds' attributes.")
+
+    # 5. CONSOLIDATE METADATA
+    zarr.consolidate_metadata(str(path))
+    print("   ✅ Repair Complete.")
+
+# --- EXECUTE FIX ---
+for f in WRF_FILES:
+    fix_wrf_zarr_permanently(f)
+# %%

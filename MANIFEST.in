@@ -1,0 +1,10 @@
+include LICENSE NOTICE README.md requirements-tested.txt
+recursive-include configs *.yaml *.yml *.json
+recursive-include patches *.patch *.json
+recursive-include data *.py *.txt *.json *.md
+recursive-include models *.py *.json *.md
+recursive-include scripts *.py
+recursive-include baselines *.py *.yaml *.yml *.json *.txt
+recursive-include evaluation *.py *.json *.txt
+recursive-include figures *.py *.json *.txt
+global-exclude *.pyc *.nc *.nc4 *.csv *.npy *.npz *.mdlus *.pt *.pth *.png *.pdf *.docx *.log

@@ -1,0 +1,420 @@
+diff --git a/physicsnemo/models/diffusion/layers.py b/physicsnemo/models/diffusion/layers.py
+index e91028a7..bb2bd7af 100644
+--- a/physicsnemo/models/diffusion/layers.py
++++ b/physicsnemo/models/diffusion/layers.py
+@@ -698,9 +698,9 @@ class UNetBlock(torch.nn.Module):
+                 # w = AttentionOp.apply(q, k)
+                 # a = torch.einsum("nqk,nck->ncq", w, v)
+                 # Compute attention in one step
+-                with amp.autocast(enabled=self.amp_mode):
++                with torch.amp.autocast(device_type="cuda", enabled=self.amp_mode):
+                     attn = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+-                x = self.proj(attn.reshape(*x.shape)).add_(x)
++                x = self.proj(attn.to(x.dtype).reshape(*x.shape)).add_(x)
+                 x = x * self.skip_scale
+ 
+             return x
+diff --git a/physicsnemo/models/diffusion/preconditioning.py b/physicsnemo/models/diffusion/preconditioning.py
+index 286eaf27..ba984f59 100644
+--- a/physicsnemo/models/diffusion/preconditioning.py
++++ b/physicsnemo/models/diffusion/preconditioning.py
+@@ -827,6 +827,7 @@ class EDMPrecondSuperResolution(Module):
+         img_lr: torch.Tensor,
+         sigma: torch.Tensor,
+         force_fp32: bool = False,
++        basin_id: torch.Tensor = None,
+         **model_kwargs: dict,
+     ) -> torch.Tensor:
+         """
+@@ -886,6 +887,7 @@ class EDMPrecondSuperResolution(Module):
+             arg,
+             c_noise.flatten(),
+             class_labels=None,
++            basin_id=basin_id,
+             **model_kwargs,
+         )
+ 
+diff --git a/physicsnemo/models/diffusion/song_unet.py b/physicsnemo/models/diffusion/song_unet.py
+index 68b6d428..e82bdbce 100644
+--- a/physicsnemo/models/diffusion/song_unet.py
++++ b/physicsnemo/models/diffusion/song_unet.py
+@@ -274,6 +274,10 @@ class SongUNet(Module):
+         act: str = "silu",
+         profile_mode: bool = False,
+         amp_mode: bool = False,
++        num_basins: int = 0,
++        basin_film_dim: int = 0,
++        basin_concat_dim: int = 0,
++        basin_emb_dropout: float = 0.0,
+     ):
+         valid_embedding_types = ["fourier", "positional", "zero"]
+         if embedding_type not in valid_embedding_types:
+@@ -342,6 +346,41 @@ class SongUNet(Module):
+             )
+             torch.nn.init.trunc_normal_(self.spatial_emb, std=0.02)
+ 
++        # Optional per-basin conditioning. Two independent, toggleable paths:
++        #   FiLM   -> add a learned per-basin term to the block embedding ``emb``
++        #             (modulates every UNetBlock via its existing affine layer).
++        #   concat -> broadcast a learned per-basin embedding to (B, dim, H, W)
++        #             and concatenate to the input image channels.
++        # Both default OFF (num_basins == 0), making the model bit-identical to
++        # the baseline. The caller (train.py) is responsible for adding
++        # ``basin_concat_dim`` to ``in_channels``.
++        # Embedding tables get ONE extra "null" row at index ``num_basins`` used
++        # (a) as a conditioning-dropout target during training so the embedding
++        # becomes a bounded residual rather than a memorization shortcut, and
++        # (b) as a principled fallback for basins with no trained row (e.g. the
++        # OOD holdout basins) -- pass basin_id == num_basins at inference.
++        self.num_basins = num_basins
++        self.basin_film_dim = basin_film_dim
++        self.basin_concat_dim = basin_concat_dim
++        self.basin_emb_dropout = float(basin_emb_dropout)
++        self.use_basin_film = num_basins > 0 and basin_film_dim > 0
++        self.use_basin_concat = num_basins > 0 and basin_concat_dim > 0
++        # The extra null row exists only when conditioning-dropout is enabled.
++        # This keeps tables at exactly ``num_basins`` rows otherwise, so older
++        # checkpoints trained without the null row still load.
++        n_rows = num_basins + (1 if self.basin_emb_dropout > 0 else 0)
++        self.basin_null_idx = num_basins  # valid only when n_rows == num_basins+1
++        if self.use_basin_film:
++            self.basin_emb_film = torch.nn.Embedding(n_rows, basin_film_dim)
++            self.basin_film_proj = Linear(
++                in_features=basin_film_dim,
++                out_features=emb_channels,
++                amp_mode=amp_mode,
++                **init,
++            )
++        if self.use_basin_concat:
++            self.basin_emb_concat = torch.nn.Embedding(n_rows, basin_concat_dim)
++
+         # Mapping.
+         if self.embedding_type != "zero":
+             self.map_noise = (
+@@ -494,7 +533,9 @@ class SongUNet(Module):
+                     **init_zero,
+                 )
+ 
+-    def forward(self, x, noise_labels, class_labels, augment_labels=None):
++    def forward(
++        self, x, noise_labels, class_labels, augment_labels=None, basin_id=None
++    ):
+         with (
+             nvtx.annotate(message="SongUNet", color="blue")
+             if self.profile_mode
+@@ -525,6 +566,44 @@ class SongUNet(Module):
+                     (noise_labels.shape[0], self.emb_channels), device=x.device
+                 )
+ 
++            # Conditioning dropout: during training, replace a random subset of
++            # basin ids with the null row so the model can't over-rely on the
++            # embedding (forces it to predict from physical inputs too).
++            if (
++                (self.use_basin_film or self.use_basin_concat)
++                and basin_id is not None
++                and self.training
++                and self.basin_emb_dropout > 0
++            ):
++                drop = (
++                    torch.rand(basin_id.shape[0], device=basin_id.device)
++                    < self.basin_emb_dropout
++                )
++                basin_id = torch.where(
++                    drop, torch.full_like(basin_id, self.basin_null_idx), basin_id
++                )
++
++            # Per-basin FiLM conditioning: add a learned per-basin term to the
++            # block embedding. For the regression UNet (embedding_type == "zero")
++            # ``emb`` starts as zeros, so this becomes purely the basin term,
++            # which the existing per-block affine layers turn into scale/shift.
++            if self.use_basin_film and basin_id is not None:
++                emb = emb + self.basin_film_proj(self.basin_emb_film(basin_id)).to(
++                    emb.dtype
++                )
++
++            # Per-basin concat conditioning: broadcast a learned per-basin
++            # embedding and append it as extra input channels. Done here (before
++            # the encoder's first conv) so it is mixed by the very first layer.
++            if self.use_basin_concat and basin_id is not None:
++                be = self.basin_emb_concat(basin_id)  # (B, basin_concat_dim)
++                be = (
++                    be[:, :, None, None]
++                    .expand(-1, -1, x.shape[-2], x.shape[-1])
++                    .to(x.dtype)
++                )
++                x = torch.cat((x, be), dim=1)
++
+             # Encoder.
+             skips = []
+             aux = x
+@@ -548,10 +627,13 @@ class SongUNet(Module):
+                     else:
+                         # For UNetBlocks check if we should use gradient checkpointing
+                         if isinstance(block, UNetBlock):
+-                            if x.shape[-1] > self.checkpoint_threshold:
+-                                # self.checkpoint = checkpoint?
+-                                # else: self.checkpoint  = lambda(block,x,emb:block(x,emb))
+-                                x = checkpoint(block, x, emb)
++                            use_ckpt = (
++                                self.training
++                                and x.shape[-1] > self.checkpoint_threshold
++                            )
++                            if use_ckpt:
++                                # Only checkpoint during training to avoid inference warnings.
++                                x = checkpoint(block, x, emb, use_reentrant=False)
+                             else:
+                                 # AssertionError: Only support NHWC layout.
+                                 x = block(x, emb)
+@@ -579,13 +661,18 @@ class SongUNet(Module):
+                         if x.shape[1] != block.in_channels:
+                             x = torch.cat([x, skips.pop()], dim=1)
+                         # check for checkpointing on decoder blocks and up sampling blocks
+-                        if (
+-                            x.shape[-1] > self.checkpoint_threshold and "_block" in name
+-                        ) or (
+-                            x.shape[-1] > (self.checkpoint_threshold / 2)
+-                            and "_up" in name
+-                        ):
+-                            x = checkpoint(block, x, emb)
++                        use_ckpt = self.training and (
++                            (
++                                x.shape[-1] > self.checkpoint_threshold
++                                and "_block" in name
++                            )
++                            or (
++                                x.shape[-1] > (self.checkpoint_threshold / 2)
++                                and "_up" in name
++                            )
++                        )
++                        if use_ckpt:
++                            x = checkpoint(block, x, emb, use_reentrant=False)
+                         else:
+                             x = block(x, emb)
+             return aux
+@@ -793,6 +880,10 @@ class SongUNetPosEmbd(SongUNet):
+         lead_time_channels: int = None,
+         lead_time_steps: int = 9,
+         prob_channels: List[int] = [],
++        num_basins: int = 0,
++        basin_film_dim: int = 0,
++        basin_concat_dim: int = 0,
++        basin_emb_dropout: float = 0.0,
+     ):
+         super().__init__(
+             img_resolution,
+@@ -818,6 +909,10 @@ class SongUNetPosEmbd(SongUNet):
+             act,
+             profile_mode,
+             amp_mode,
++            num_basins=num_basins,
++            basin_film_dim=basin_film_dim,
++            basin_concat_dim=basin_concat_dim,
++            basin_emb_dropout=basin_emb_dropout,
+         )
+ 
+         self.gridtype = gridtype
+@@ -846,6 +941,7 @@ class SongUNetPosEmbd(SongUNet):
+         embedding_selector: Optional[Callable] = None,
+         augment_labels=None,
+         lead_time_label=None,
++        basin_id=None,
+     ):
+         with (
+             nvtx.annotate(message="SongUNetPosEmbd", color="blue")
+@@ -875,7 +971,9 @@ class SongUNetPosEmbd(SongUNet):
+                     )
+                 x = torch.cat((x, selected_pos_embd), dim=1)
+ 
+-            out = super().forward(x, noise_labels, class_labels, augment_labels)
++            out = super().forward(
++                x, noise_labels, class_labels, augment_labels, basin_id=basin_id
++            )
+ 
+             if self.lead_time_mode:
+                 # if training mode, let crossEntropyLoss do softmax. The model outputs logits.
+@@ -1336,6 +1434,10 @@ class SongUNetPosLtEmbd(SongUNetPosEmbd):
+         act: str = "silu",
+         profile_mode: bool = False,
+         amp_mode: bool = False,
++        num_basins: int = 0,
++        basin_film_dim: int = 0,
++        basin_concat_dim: int = 0,
++        basin_emb_dropout: float = 0.0,
+     ):
+         super().__init__(
+             img_resolution,
+@@ -1367,6 +1469,10 @@ class SongUNetPosLtEmbd(SongUNetPosEmbd):
+             lead_time_channels,
+             lead_time_steps,
+             prob_channels,
++            num_basins=num_basins,
++            basin_film_dim=basin_film_dim,
++            basin_concat_dim=basin_concat_dim,
++            basin_emb_dropout=basin_emb_dropout,
+         )
+ 
+     def forward(
+@@ -1378,6 +1484,7 @@ class SongUNetPosLtEmbd(SongUNetPosEmbd):
+         global_index: Optional[torch.Tensor] = None,
+         embedding_selector: Optional[Callable] = None,
+         augment_labels=None,
++        basin_id=None,
+     ):
+         return super().forward(
+             x=x,
+@@ -1387,6 +1494,7 @@ class SongUNetPosLtEmbd(SongUNetPosEmbd):
+             embedding_selector=embedding_selector,
+             augment_labels=augment_labels,
+             lead_time_label=lead_time_label,
++            basin_id=basin_id,
+         )
+ 
+     # Nothing else is re-implemented, because everything is already in the
+diff --git a/physicsnemo/models/diffusion/unet.py b/physicsnemo/models/diffusion/unet.py
+index 1aeb2020..820785dd 100644
+--- a/physicsnemo/models/diffusion/unet.py
++++ b/physicsnemo/models/diffusion/unet.py
+@@ -179,6 +179,7 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
+         x: torch.Tensor,
+         img_lr: torch.Tensor,
+         force_fp32: bool = False,
++        basin_id: torch.Tensor = None,
+         **model_kwargs: dict,
+     ) -> torch.Tensor:
+ 
+@@ -196,6 +197,7 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
+             x.to(dtype),  # (c_in * x).to(dtype),
+             torch.zeros(x.shape[0], dtype=dtype, device=x.device),  # c_noise.flatten()
+             class_labels=None,
++            basin_id=basin_id,
+             **model_kwargs,
+         )
+ 
+diff --git a/physicsnemo/models/module.py b/physicsnemo/models/module.py
+index 4d3a979b..c03d3c39 100644
+--- a/physicsnemo/models/module.py
++++ b/physicsnemo/models/module.py
+@@ -377,10 +377,17 @@ class Module(torch.nn.Module):
+             Module._check_checkpoint(local_path)
+ 
+             # Load the model weights
+-            device = map_location if map_location is not None else self.device
+-            model_dict = torch.load(
+-                local_path.joinpath("model.pt"), map_location=device
+-            )
++            # Always load weights on CPU to avoid device init stalls, then move later.
++            # Also force weights_only=False for legacy checkpoints on PyTorch >= 2.6.
++            load_kwargs = {"map_location": "cpu"}
++            try:
++                model_dict = torch.load(
++                    local_path.joinpath("model.pt"), weights_only=False, **load_kwargs
++                )
++            except TypeError:
++                model_dict = torch.load(
++                    local_path.joinpath("model.pt"), **load_kwargs
++                )
+             self.load_state_dict(model_dict, strict=strict)
+ 
+     @classmethod
+@@ -456,10 +463,17 @@ class Module(torch.nn.Module):
+             # Instantiate the model
+             model = Module.instantiate(args)
+ 
+-            # Load the model weights
+-            model_dict = torch.load(
+-                local_path.joinpath("model.pt"), map_location=model.device
+-            )
++            # Load the model weights on CPU to avoid device init stalls.
++            # Also force weights_only=False for legacy checkpoints on PyTorch >= 2.6.
++            load_kwargs = {"map_location": "cpu"}
++            try:
++                model_dict = torch.load(
++                    local_path.joinpath("model.pt"), weights_only=False, **load_kwargs
++                )
++            except TypeError:
++                model_dict = torch.load(
++                    local_path.joinpath("model.pt"), **load_kwargs
++                )
+ 
+             model_dict = convert_ckp_apex(ckp_args, model_args, model_dict)
+             model.load_state_dict(model_dict, strict=False)
+diff --git a/physicsnemo/utils/corrdiff/utils.py b/physicsnemo/utils/corrdiff/utils.py
+index 4502a77e..5229e433 100644
+--- a/physicsnemo/utils/corrdiff/utils.py
++++ b/physicsnemo/utils/corrdiff/utils.py
+@@ -67,7 +67,7 @@ def regression_step(
+         If img_lr has a batch size greater than 1.
+     """
+     # Create a tensor of zeros with the given shape and move it to the appropriate device
+-    x_hat = torch.zeros(latents_shape, dtype=torch.float64, device=net.device)
++    x_hat = torch.zeros(latents_shape, dtype=torch.float32, device=net.device)
+ 
+     # Safety check: avoid silently ignoring batch elements in img_lr
+     if img_lr.shape[0] > 1:
+@@ -127,7 +127,8 @@ def diffusion_step(
+     rank_batches : list
+         List of batches of seeds to process.
+     img_lr : torch.Tensor
+-        Low-resolution input image with shape (seed_batch_size, channels_lr, height, width).
++        Low-resolution input image with shape (B_lr, channels_lr, height, width).
++        ``B_lr`` may be ``1`` and will be expanded per seed batch as needed.
+     rank : int, optional
+         Rank of the current process for distributed processing.
+     device : torch.device, optional
+@@ -143,7 +144,7 @@ def diffusion_step(
+     -------
+     torch.Tensor
+         Generated images concatenated across batches with shape
+-        (seed_batch_size * len(rank_batches), out_channels, height, width).
++        (sum(len(batch) for batch in rank_batches), out_channels, height, width).
+     """
+ 
+     # Check img_lr dimensions match expected shape
+@@ -178,11 +179,32 @@ def diffusion_step(
+             if batch_size == 0:
+                 continue
+ 
++            if img_lr.shape[0] == 1:
++                img_lr_batch = img_lr.expand(batch_size, -1, -1, -1)
++            elif img_lr.shape[0] >= batch_size:
++                img_lr_batch = img_lr[:batch_size]
++            else:
++                raise ValueError(
++                    f"img_lr batch size {img_lr.shape[0]} is too small for seed batch {batch_size}."
++                )
++
++            if lead_time_label is not None:
++                if lead_time_label.shape[0] == 1:
++                    lead_time_label_batch = lead_time_label.expand(batch_size, *lead_time_label.shape[1:])
++                elif lead_time_label.shape[0] >= batch_size:
++                    lead_time_label_batch = lead_time_label[:batch_size]
++                else:
++                    raise ValueError(
++                        "lead_time_label batch size "
++                        f"{lead_time_label.shape[0]} is too small for seed batch {batch_size}."
++                    )
++                additional_args["lead_time_label"] = lead_time_label_batch
++
+             # Initialize random generator, and generate latents
+             rnd = StackedRandomGenerator(device, batch_seeds)
+             latents = rnd.randn(
+                 [
+-                    img_lr.shape[0],
++                    batch_size,
+                     img_out_channels,
+                     img_shape[0],
+                     img_shape[1],
+@@ -192,10 +214,11 @@ def diffusion_step(
+ 
+             with torch.inference_mode():
+                 images = sampler_fn(
+-                    net, latents, img_lr, randn_like=rnd.randn_like, **additional_args
++                    net, latents, img_lr_batch, randn_like=rnd.randn_like, **additional_args
+                 )
+             all_images.append(images)
+-    return torch.cat(all_images)
++    # Keep output dtype consistent with inputs (avoid float64 residuals)
++    return torch.cat(all_images).to(dtype=img_lr.dtype)
+ 
+ 
+ ############################################################################

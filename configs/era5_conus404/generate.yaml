@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+# Settings recovered from the saved paper-output configuration, not current mutable YAML.
+dataset:
+  type: era5_conus404
+  input_data_path: ${oc.env:DG_DATA_ROOT,./data_local}/era5_4km_2000_2012_6h.zarr
+  target_data_path: ${oc.env:DG_DATA_ROOT,./data_local}/conus404_4km_2000_2012_6h.zarr
+  stats_path: ${oc.env:DG_DATA_ROOT,./data_local}/era5_conus404_4km_stats.json
+  train: false
+  train_years:
+  - 2000
+  - 2011
+  valid_years:
+  - 2012
+  - 2012
+  apply_scale_factors: true
+  input_scale_factors: {}
+  output_scale_factors:
+    PSFC: 0.01
+  clip_negative: true
+  precip_threshold: 0.1
+  input_variables:
+  - PREC_ACC_NC
+  - GLW
+  - SWDOWN
+  - PSFC
+  - T2
+  - U10
+  - V10
+  - q_925
+  - q_850
+  - q_700
+  - q_500
+  - r_925
+  - r_850
+  - r_700
+  - r_500
+  - t_925
+  - t_850
+  - t_700
+  - t_500
+  - u_925
+  - u_850
+  - u_700
+  - u_500
+  - v_925
+  - v_850
+  - v_700
+  - v_500
+  - z_925
+  - z_850
+  - z_700
+  - z_500
+  - cc_925
+  - cc_850
+  - cc_700
+  - cc_500
+  output_variables:
+  - PREC_ACC_NC
+  - GLW
+  - SWDOWN
+  - PSFC
+  - Q2
+  - T2
+  - U10
+  - V10
+  landmask_path: null
+  mask_ocean_in_target: false
+  sanitize_inputs: true
+  keep_ocean_as_nan: false
+  drop_nan_land_timesteps: false
+  nan_check_vars: null
+  nan_chunk: 128
+  debug_nan: false
+  debug_nan_limit: 10
+  coastal_buffer_pixels: 0
+  crop_to_multiple: 32
+sampler:
+  type: stochastic
+  num_steps: 18
+generation:
+  num_ensembles: 32
+  seed_batch_size: 1
+  inference_mode: all
+  hr_mean_conditioning: true
+  times_range: null
+  has_lead_time: false
+  perf:
+    force_fp16: false
+    use_torch_compile: false
+    num_writer_workers: 1
+  patching: false
+  seed_offset: 0
+  times: null
+  random_samples: 200
+  random_seed: 42
+  io:
+    reg_ckpt_filename: ${oc.env:DG_CHECKPOINT_ROOT,./checkpoints}/era5_conus404/UNet.0.150016.mdlus
+    res_ckpt_filename: ${oc.env:DG_CHECKPOINT_ROOT,./checkpoints}/era5_conus404/EDMPrecondSuperResolution.0.670016.mdlus
+    output_filename: predictions.nc
+wandb:
+  mode: disabled
+  results_dir: ./wandb

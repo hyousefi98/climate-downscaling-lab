@@ -1,0 +1,262 @@
+"""Build a new, strictly validated AORC pair on 200 backward six-hour windows.
+
+Reads each required compressed Zarr field chunk once. Originals are read-only.
+Output preserves source stored numbers; the inference adapter owns transforms.
+"""
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+from pathlib import Path
+import hashlib
+import json
+import time
+import traceback
+
+import netCDF4
+import numpy as np
+from numcodecs import get_codec, blosc
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
+PREVIOUS = HERE.parent / "r2_comment3_matched_inference"
+DATA = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+SOURCES = {
+    "synthetic_input": DATA / "aorc_12km_2_3km_2012.zarr",
+    "reference_aorc": DATA / "aorc_3km_2012.zarr",
+}
+CHANNELS = ["APCP_surface", "DLWRF_surface", "DSWRF_surface", "PRES_surface",
+            "SPFH_2maboveground", "TMP_2maboveground", "UGRD_10maboveground", "VGRD_10maboveground"]
+NONNEGATIVE = set(CHANNELS[:6])
+CLIPPED_BY_ORIGINAL_LOADER = {"APCP_surface", "DLWRF_surface", "DSWRF_surface", "SPFH_2maboveground"}
+PHYSICAL_FACTORS = [0.1, 0.1, 0.1, 10.0, 0.0001, 0.1, 0.1, 0.1]
+LEGACY_FACTORS = [0.1, 0.1, 0.1, 0.1, 0.001, 0.1, 0.1, 0.1]
+PHYSICAL_UNITS = ["mm", "W m-2", "W m-2", "Pa", "kg kg-1", "K", "m s-1", "m s-1"]
+FINAL = HERE / "aligned_inputs.nc"
+PARTIAL = HERE / "aligned_inputs.partial.nc"
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
+
+
+def sha_file(path):
+    sha = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def small_array(path):
+    meta = json.loads((path / ".zarray").read_text())
+    chunks, shape = tuple(meta["chunks"]), tuple(meta["shape"])
+    result = np.empty(shape, dtype=meta["dtype"])
+    codec = get_codec(meta["compressor"])
+    for index in np.ndindex(*(int(np.ceil(n/c)) for n,c in zip(shape,chunks))):
+        chunk = np.frombuffer(codec.decode((path / ".".join(map(str,index))).read_bytes()),dtype=meta["dtype"]).reshape(chunks)
+        end = [min((i+1)*c,n) for i,c,n in zip(index,chunks,shape)]
+        dest = tuple(slice(i*c,e) for i,c,e in zip(index,chunks,end))
+        crop = tuple(slice(0,e-i*c) for i,c,e in zip(index,chunks,end))
+        result[dest] = chunk[crop]
+    return result
+
+
+def inspect_source(path, requested, lat, lon):
+    names = [x.decode() for x in small_array(path / "aorc_variable")]
+    assert names == CHANNELS, (str(path), names)
+    assert np.array_equal(small_array(path / "lat")[:288,:480], lat)
+    assert np.array_equal(small_array(path / "lon")[:288,:480], lon)
+    hours = small_array(path / "time")
+    attrs = json.loads((path / "time/.zattrs").read_text())
+    assert attrs["units"] == "hours since 2012-01-01 00:00:00", attrs
+    times = np.datetime64("2012-01-01T00", "h") + hours.astype("timedelta64[h]")
+    assert np.all(np.diff(times) == np.timedelta64(1,"h"))
+    windows = requested[:,None] + np.arange(-5,1,dtype="timedelta64[h]")[None,:]
+    indices = np.searchsorted(times, windows)
+    assert np.all(indices < len(times)) and np.array_equal(times[indices], windows)
+    meta = json.loads((path / "aorc/.zarray").read_text())
+    assert meta["shape"] == [8784,8,301,501]
+    assert meta["chunks"][2:] == [301,501]
+    return indices, meta, dict(path=str(path), time_count=len(times),
+        first_time=str(times[0]), last_time=str(times[-1]),
+        all_requested_hours_exist=True, coordinates_exact_baseline=True,
+        hourly_indices=indices.tolist(), field_metadata=meta,
+        metadata_sha256={str(path/key):sha_file(path/key) for key in
+          ["aorc/.zarray","time/.zattrs","time/.zarray","aorc_variable/.zarray","lat/.zarray","lon/.zarray"]})
+
+
+def validate_and_aggregate(group_name, path, indices, meta, mask, dates):
+    chunk_shape = tuple(meta["chunks"])
+    codec = get_codec(meta["compressor"])
+    sums = np.zeros((200,8,288,480), dtype=np.float64)
+    counts = np.zeros((200,8), dtype=np.int16)
+    checks = {name:dict(hourly_values_checked=0, nonfinite=0, fill_sentinel=0,
+                       negative=0, negative_is_invalid=name in NONNEGATIVE and name not in CLIPPED_BY_ORIGINAL_LOADER,
+                       negative_examples=[],
+                       minimum=None, maximum=None) for name in CHANNELS}
+    chunks_manifest = []
+    chunk_ids = sorted(set((indices // chunk_shape[0]).ravel().tolist()))
+    started = time.monotonic()
+    for chunk_id in chunk_ids:
+        time_start = chunk_id * chunk_shape[0]
+        selections = [(i, row[(row >= time_start) & (row < time_start+chunk_shape[0])] - time_start)
+                      for i,row in enumerate(indices)]
+        selections = [(i,s) for i,s in selections if len(s)]
+        for channel_chunk in range(int(np.ceil(8/chunk_shape[1]))):
+            channel_start = channel_chunk * chunk_shape[1]
+            filename = path / "aorc" / f"{chunk_id}.{channel_chunk}.0.0"
+            encoded = filename.read_bytes()
+            chunks_manifest.append(dict(path=str(filename), bytes=len(encoded), sha256=hashlib.sha256(encoded).hexdigest()))
+            decoded = codec.decode(encoded)
+            block = np.frombuffer(decoded,dtype=meta["dtype"]).reshape(chunk_shape)
+            del encoded
+            for case, hours in selections:
+                for local_channel in range(min(chunk_shape[1],8-channel_start)):
+                    channel = channel_start + local_channel
+                    name = CHANNELS[channel]
+                    field = block[hours,local_channel,:288,:480]
+                    selected = field[:,mask]
+                    nonfinite = ~np.isfinite(selected)
+                    fill = selected <= -32000
+                    negative = selected < 0
+                    record = checks[name]
+                    record["hourly_values_checked"] += int(selected.size)
+                    record["nonfinite"] += int(nonfinite.sum())
+                    record["fill_sentinel"] += int(fill.sum())
+                    record["negative"] += int(negative.sum())
+                    if negative.any() and len(record["negative_examples"])<10:
+                        mask_coords=np.argwhere(mask)
+                        for h,p in np.argwhere(negative)[:10-len(record["negative_examples"])]:
+                            record["negative_examples"].append(dict(case=case,hourly_index=int(time_start+hours[h]),
+                                y=int(mask_coords[p,0]),x=int(mask_coords[p,1]),raw_value=float(selected[h,p])))
+                    finite = selected[np.isfinite(selected)]
+                    if finite.size:
+                        minimum,maximum = float(finite.min()),float(finite.max())
+                        record["minimum"] = minimum if record["minimum"] is None else min(record["minimum"],minimum)
+                        record["maximum"] = maximum if record["maximum"] is None else max(record["maximum"],maximum)
+                    invalid = nonfinite | fill | (negative if record["negative_is_invalid"] else False)
+                    if invalid.any():
+                        examples = np.argwhere(invalid)[:10]
+                        mask_coords = np.argwhere(mask)
+                        failure = dict(group=group_name,source=str(path),case=case,time=dates[case],channel=name,
+                            checks_so_far=checks,nonfinite_count=int(nonfinite.sum()),fill_count=int(fill.sum()),
+                            negative_count=int(negative.sum()),examples=[dict(hourly_index=int(time_start+hours[h]),
+                                y=int(mask_coords[p,0]),x=int(mask_coords[p,1]),value=str(selected[h,p])) for h,p in examples])
+                        write_json(HERE/"invalid_hourly_data.json",failure)
+                        raise ValueError(f"Invalid raw hourly data on common verification mask: {group_name}, {dates[case]}, {name}")
+                    sums[case,channel] += field.sum(axis=0,dtype=np.float64)
+                    counts[case,channel] += len(hours)
+            del block,decoded
+        print(f"{group_name}: chunk {chunk_id+1}/37 checked and accumulated ({time.monotonic()-started:.1f}s)",flush=True)
+    assert np.all(counts == 6), counts
+    sums[:,1:] /= 6.0
+    result = sums.astype(np.float32)
+    del sums
+    assert np.isfinite(result[:,:,mask]).all()
+    aggregate_checks={}
+    for channel,name in enumerate(CHANNELS):
+        values=result[:,channel][:,mask]
+        aggregate_checks[name]=dict(negative_count=int((values<0).sum()),
+            minimum_raw=float(values.min()),maximum_raw=float(values.max()),
+            minimum_physical=float(values.min()*PHYSICAL_FACTORS[channel]),
+            physical_units=PHYSICAL_UNITS[channel],
+            original_loader_clips_after_aggregation=name in CLIPPED_BY_ORIGINAL_LOADER)
+    return result,dict(channel_checks=checks,all_hours_valid_on_reference_mask=True,
+        aggregated_value_checks=aggregate_checks,
+        raw_stored_number_convention_preserved=True,aggregation_dtype="float64 accumulation; float32 stored result",
+        field_chunk_reads=len(chunks_manifest),each_required_field_chunk_read_once=True,
+        compressed_chunk_manifest=chunks_manifest,source_hours_per_case_channel=6)
+
+
+def independent_reconstruction(path, values, indices, mask, group_name):
+    # Independent Zarr API reads and NumPy reductions for three fixed cases.
+    # Validation is intentionally separate from chunk-index traversal above.
+    import zarr
+    store = zarr.open(str(path),mode="r")
+    rows = []
+    for case in (0,100,199):
+        begin,end = int(indices[case,0]),int(indices[case,-1])+1
+        hourly = np.asarray(store["aorc"][begin:end,:,:288,:480])
+        expected = np.empty((8,288,480),np.float32)
+        expected[0] = np.sum(hourly[:,0],axis=0,dtype=np.float64)
+        expected[1:] = np.mean(hourly[:,1:],axis=0,dtype=np.float64)
+        actual = values[case]
+        np.testing.assert_array_equal(actual[:,mask],expected[:,mask])
+        rows.append(dict(case=case,hourly_indices=list(range(begin,end)),
+                         exact_float32_equal_on_reference_mask=True,max_absolute_error_on_reference_mask=0.0))
+        print(f"{group_name}: independent reconstruction case {case} passed",flush=True)
+    return rows
+
+
+def main():
+    HERE.mkdir(exist_ok=True,parents=True)
+    if FINAL.exists() or PARTIAL.exists():
+        raise FileExistsError("Refusing to overwrite existing aligned input artifact")
+    blosc.set_nthreads(4)
+    dates = json.loads((PREVIOUS/"experiment_I_timestamps_200.json").read_text())
+    requested = np.array(dates,dtype="datetime64[h]")
+    assert len(dates) == len(set(dates)) == 200
+    epoch = requested.astype("datetime64[s]").astype(np.int64)
+    with netCDF4.Dataset(ROOT/"all_aorc_12km_to_3km.nc") as baseline:
+        baseline.set_auto_mask(False)
+        lat,lon = baseline["lat"][:],baseline["lon"][:]
+        mask = np.isfinite(baseline["truth"]["APCPsurface"][0])
+    assert lat.shape == lon.shape == mask.shape == (288,480)
+    assert mask.sum() == 128619
+    report = dict(scope="New corrected paired evaluation input/reference preparation only; originals untouched.",
+        output=str(FINAL),dates=dates,case_count=200,valid_reference_cells=int(mask.sum()),
+        time_semantics="Precipitation window (t-6 h,t]; hourly labels t-5,...,t. Other channels mean of same six hourly records.",
+        numeric_convention="Raw AORC stored numbers; no clipping, scaling, normalization, fill replacement or land masking applied to values.",
+        outside_mask="Values outside the common verification mask are retained, including NaNs; adapter must mask them safely.",
+        negative_validation="NaN/Inf and <=-32000 fill sentinels are invalid in every channel on the reference mask. Negative pressure/temperature are invalid. Finite negative APCP/DSWRF/DLWRF/SPFH values are reported and retained unchanged through aggregation; the inference adapter applies original AORC clipping only after aggregation. Signed wind values are allowed.",
+        initial_strict_screen="The initial stricter screen stopped on 23 negative hourly DSWRF values, minimum -0.160265 W/m2. Preserved in initial_strict_screen/. Criterion revised explicitly to retain original postaggregation clipping, without changing mask or replacing hourly values.",
+        script_sha256=sha_file(__file__),sources={},independent_reconstruction={})
+    with netCDF4.Dataset(PARTIAL,"w") as output:
+        for name,size in [("time",200),("y",288),("x",480),("bounds",2)]:output.createDimension(name,size)
+        output.title="Aligned AORC synthetic inputs and common reference for corrected paired evaluation"
+        output.numeric_convention=report["numeric_convention"]
+        output.aggregation=report["time_semantics"]
+        output.source_dates_file=str(PREVIOUS/"experiment_I_timestamps_200.json")
+        tv=output.createVariable("time","i8",("time",));tv[:]=epoch;tv.units="seconds since 1970-01-01 00:00:00";tv.calendar="proleptic_gregorian";tv.bounds="time_bounds"
+        bv=output.createVariable("time_bounds","i8",("time","bounds"));bv[:]=np.stack([epoch-21600,epoch],axis=-1);bv.units=tv.units
+        for name,data in [("lat",lat),("lon",lon)]:output.createVariable(name,"f4",("y","x"))[:]=data
+        output.createVariable("verification_mask","i1",("y","x"))[:]=mask.astype(np.int8)
+        for group_name,path in SOURCES.items():
+            indices,meta,source_report=inspect_source(path,requested,lat,lon)
+            values,checks=validate_and_aggregate(group_name,path,indices,meta,mask,dates)
+            report["sources"][group_name]={**source_report,**checks}
+            report["independent_reconstruction"][group_name]=independent_reconstruction(path,values,indices,mask,group_name)
+            group=output.createGroup(group_name);group.source_path=str(path)
+            for channel,name in enumerate(CHANNELS):
+                var=group.createVariable(name,"f4",("time","y","x"),zlib=True,complevel=1,shuffle=True,chunksizes=(1,288,480),fill_value=np.nan)
+                var.raw_to_physical_factor=PHYSICAL_FACTORS[channel]
+                var.raw_to_legacy_model_factor=LEGACY_FACTORS[channel]
+                var.physical_units_after_conversion=PHYSICAL_UNITS[channel]
+                var.aggregation="sum" if channel==0 else "mean"
+                var[:]=values[:,channel]
+            del values
+            output.sync()
+            write_json(HERE/"build_audit.json",report)
+        output.validation_status="All selected hourly source values passed strict checks on the common reference mask."
+    with netCDF4.Dataset(PARTIAL) as output:
+        output.set_auto_mask(False)
+        assert np.array_equal(output["time"][:],epoch)
+        assert np.array_equal(output["lat"][:],lat) and np.array_equal(output["lon"][:],lon)
+        for group_name in SOURCES:
+            for name in CHANNELS:
+                for case in (0,100,199):
+                    assert np.isfinite(output[group_name][name][case][mask]).all()
+    PARTIAL.rename(FINAL)
+    report["complete"]=True
+    report["artifact_bytes"]=FINAL.stat().st_size
+    report["artifact_sha256"]=sha_file(FINAL)
+    write_json(HERE/"build_audit.json",report)
+    print(f"BUILT {FINAL}; review reported negative magnitudes before creating ALIGNED_INPUTS_READY",flush=True)
+
+
+if __name__=="__main__":
+    try:
+        main()
+    except Exception as error:
+        HERE.mkdir(exist_ok=True,parents=True)
+        write_json(HERE/"build_failure.json",dict(error=str(error),type=type(error).__name__,traceback=traceback.format_exc()))
+        raise

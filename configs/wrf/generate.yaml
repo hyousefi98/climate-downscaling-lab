@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+# Settings recovered from the saved paper-output configuration, not current mutable YAML.
+dataset:
+  type: wrf
+  input_data_path: ${oc.env:DG_DATA_ROOT,./data_local}/wrf_12km_on_aorc_3km_2000_2012.zarr
+  target_data_path: ${oc.env:DG_DATA_ROOT,./data_local}/wrf_3km_on_aorc_3km_2000_2012.zarr
+  stats_path: ${oc.env:DG_DATA_ROOT,./data_local}/wrf_stats_3km.json
+  train: false
+  train_years:
+  - 2000
+  - 2011
+  valid_years:
+  - 2012
+  - 2012
+  clip_negative: true
+  precip_threshold: 0.1
+  landmask_path: ${oc.env:DG_DATA_ROOT,./data_local}/aorc_land_mask_3km.nc
+  mask_ocean_in_target: true
+  keep_ocean_as_nan: true
+  input_variables:
+  - RAIN_TOTAL
+  - GLW
+  - SWDOWN
+  - PSFC
+  - Q2
+  - T2
+  - U10
+  - V10
+  output_variables:
+  - RAIN_TOTAL
+  - GLW
+  - SWDOWN
+  - PSFC
+  - Q2
+  - T2
+  - U10
+  - V10
+sampler:
+  type: stochastic
+  num_steps: 18
+generation:
+  num_ensembles: 32
+  seed_batch_size: 1
+  inference_mode: all
+  hr_mean_conditioning: true
+  times_range: null
+  has_lead_time: false
+  perf:
+    force_fp16: false
+    use_torch_compile: false
+    num_writer_workers: 1
+  patching: false
+  seed_offset: 0
+  times: null
+  random_samples: 200
+  random_seed: 42
+  io:
+    reg_ckpt_filename: ${oc.env:DG_CHECKPOINT_ROOT,./checkpoints}/wrf/UNet.0.155008.mdlus
+    res_ckpt_filename: ${oc.env:DG_CHECKPOINT_ROOT,./checkpoints}/wrf/EDMPrecondSuperResolution.0.800000.mdlus
+    output_filename: predictions.nc
+wandb:
+  mode: disabled
+  results_dir: ./wandb

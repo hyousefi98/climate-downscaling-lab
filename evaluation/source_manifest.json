@@ -1,0 +1,139 @@
+{
+  "kind": "source provenance only; no model/data/results artifacts",
+  "files": [
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_3km_v3/score_samples1.py",
+      "source_sha256": "69d82cef8fb80b18959a8501f926ed4dea7e0d4c9a0928d2c0dfeea474de16f5",
+      "ported_path": "evaluation/historical/aorc/score_samples1.py",
+      "ported_sha256": "69d82cef8fb80b18959a8501f926ed4dea7e0d4c9a0928d2c0dfeea474de16f5",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_3km_v3/score_netcdf_metrics_transfer.py",
+      "source_sha256": "b627e841cdf1aea74cbff5640dd344c06a57bc255ddcd2ebe6b56d3d37c93c4c",
+      "ported_path": "evaluation/historical/aorc/score_netcdf_metrics_transfer.py",
+      "ported_sha256": "b627e841cdf1aea74cbff5640dd344c06a57bc255ddcd2ebe6b56d3d37c93c4c",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_3km_v3/compare_transfer_vs_wrf_aorc.py",
+      "source_sha256": "e1f2680953e77668dd35f94eddddebd61b47387169e63a163b1e8946babd79ec",
+      "ported_path": "evaluation/historical/aorc/compare_transfer_vs_wrf_aorc.py",
+      "ported_sha256": "e1f2680953e77668dd35f94eddddebd61b47387169e63a163b1e8946babd79ec",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_wrf_3km_v4/score_samples3.py",
+      "source_sha256": "f35fcb950a0fa1fa36e3b21a51a00da44a25bc665b3be516c50072cccc1c4fce",
+      "ported_path": "evaluation/historical/wrf/score_samples3.py",
+      "ported_sha256": "cce2d9e408a8a2bf80663f4ef587310d140a559a4c78a4e1dbf3e867fc10b05d",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_wrf_3km_v4/score_precip_threeway_metrics.py",
+      "source_sha256": "56c16a0f2ba4563e577448daf46fa5ddf1d433311ba3e17d34a0824ed7ae495c",
+      "ported_path": "evaluation/historical/wrf/score_precip_threeway_metrics.py",
+      "ported_sha256": "7282b7366392c35704f325367f8290f19f73291c2aebb1fcbc0bd4aa598e0dfc",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_wrf_3km_v4/score_input_vs_target.py",
+      "source_sha256": "81dece191b51e7336a542826361e51b56ec18adaa701f68fc668a590d9c71bc7",
+      "ported_path": "evaluation/historical/wrf/score_input_vs_target.py",
+      "ported_sha256": "100fd7a519c2c4f9cf8bb1a8a969c70f79730cc5bff2e9ccbca8ffdecab333fe",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_wrf_3km_v4/compare_three_way_scores.py",
+      "source_sha256": "d5423a11e2e4c74a01a14a5a1278f285d84e17cc47e44114b5bb58406dee0d13",
+      "ported_path": "evaluation/historical/wrf/compare_three_way_scores.py",
+      "ported_sha256": "bf2a60f64e6c35f61cf52c80a637fc659aaf5a88462baac542de7974dfbaba93",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_conus404_era5_4km_v1/score_samples1.py",
+      "source_sha256": "b92c077437a0adec2c75c76e1c79b304e358bcaad324092bf1d74ff4b959d5f7",
+      "ported_path": "evaluation/historical/era5_conus404/score_samples1.py",
+      "ported_sha256": "b92c077437a0adec2c75c76e1c79b304e358bcaad324092bf1d74ff4b959d5f7",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_conus404_era5_4km_v1/score_input_vs_target.py",
+      "source_sha256": "699bf4972185302cdcb45441d70522d55747955b4e449ef2ea13a664ba9cb8e1",
+      "ported_path": "evaluation/historical/era5_conus404/score_input_vs_target.py",
+      "ported_sha256": "69474b41dd8701b5ca45398d11cf0871db59279d8154e3a223a09c7234afa2ff",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-18",
+      "source": "r2_comment3_corrected_paired/score_corrected_pair.py",
+      "source_sha256": "eef8b0488a759abdb52c0b4484baf1522e24a598f7b64ca9d3e91eb335b8deb9",
+      "ported_path": "evaluation/historical/revision_matched/score_corrected_pair.py",
+      "ported_sha256": "f7b8d0ada748964039cd6f93bb0d952ba062691a07c0c4b9186887592dbb21e1",
+      "changes": "Removed a result value from the docstring; exact 200-case/four-member paired validation and scoring retained."
+    }
+  ],
+  "derived_implementations": [
+    {
+      "source": "r1_comment18_revision/analysis/percentile_fss.py",
+      "source_sha256": "2479a8bc2cc115c7751e90f01a395a97f6bd30ef7f070a5ab1d88a889744d2b3",
+      "implementation": "evaluation/percentile_fss.py",
+      "changes": "Portable grouped-NetCDF interface, explicit mask and dates, temporary scratch order statistics, float64 calculations. Preserves zero-inclusive training-only linear quantiles and pooled expanded-neighborhood FSS. Does not reproduce historical loader normalization roundtrip or NaN-to-zero filtering; supply intended physical inputs explicitly."
+    }
+  ],
+  "variants": {
+    "common_reference": "evaluation.score: exact time/grid, common finite reference mask, every ensemble member finite, float32 member mean, no new postmean threshold; explicit symmetric units conversion.",
+    "corrected_pair": "historical/revision_matched/score_corrected_pair.py: exact eight-variable AORC truth, 200 timestamps, 4 members, generation/checkpoint/sampler configuration equality, humidity physical factor 0.1, pressure hPa.",
+    "original_synthetic": "historical/aorc/score_samples1.py: original no-postmean-cutoff baseline.",
+    "original_transfer": "historical/aorc/score_netcdf_metrics_transfer.py: original default 0.1 mm postmean precipitation threshold; distinct from original synthetic scorer.",
+    "FSS_table": "Older score scripts: deterministic ensemble mean followed by >= threshold, zero-padded neighborhoods and mean of defined per-time scores.",
+    "FSS_figures": "Historical probabilistic FSS scripts: ensemble mean of binary exceedances, valid-support normalization, expanded valid centers, pooled time-space numerator/denominator.",
+    "PBIAS": "100 sum(prediction-reference)/sum(abs(reference)), including signed wind components.",
+    "CRPS": "Empirical ensemble CRPS, not fair CRPS.",
+    "CSI": "Inclusive >= threshold; no-events case is undefined.",
+    "missing_values": "Modern code rejects missing predictions inside common reference support. Historical variants retain their original handling."
+  }
+}

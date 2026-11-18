@@ -1,0 +1,386 @@
+#%%
+"""
+COMBINED: Merge yearly AORC zarr files AND resample to 6-hourly in ONE PASS.
+
+This saves time by:
+1. Reading each yearly file once
+2. Resampling to 6-hourly immediately
+3. Writing directly to the combined output
+
+No intermediate multi-year hourly file needed!
+"""
+
+import shutil
+import numpy as np
+import xarray as xr
+import zarr
+from pathlib import Path
+from numcodecs import Blosc
+
+# ================= CONFIGURATION =================
+IN_DIR = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+
+# Define datasets to process
+# Format: (input_pattern, output_name, precip_var)
+DATASETS = [
+    ("aorc_3km_{year}.zarr", "aorc_3km_2000_2012_6h.zarr", "APCP_surface"),
+    ("aorc_12km_2_3km_{year}.zarr", "aorc_12km_2_3km_2000_2012_6h.zarr", "APCP_surface"),
+    ("aorc_4km_{year}.zarr", "aorc_4km_2000_2012_6h.zarr", "APCP_surface"),
+    ("aorc_28km_2_4km_{year}.zarr", "aorc_28km_2_4km_2000_2012_6h.zarr", "APCP_surface"),
+]
+
+YEARS = list(range(2000, 2013))
+
+# Chunking Config
+TIME_CHUNK_6H = 240
+CHANNEL_CHUNK = 8
+
+COMPRESSOR = Blosc(cname='zstd', clevel=3, shuffle=Blosc.SHUFFLE)
+
+# Fill value threshold
+FILL_VALUE_THRESHOLD = -32000
+
+
+# ================= FUNCTIONS =================
+
+def clean_data(data):
+    """Replaces fill values (<-32000) with NaN."""
+    return np.where(data > FILL_VALUE_THRESHOLD, data, np.nan)
+
+
+def resample_to_6hourly(data_hourly, times_hourly, var_names, precip_var):
+    """
+    Resample hourly data to 6-hourly.
+
+    Args:
+        data_hourly: numpy array (time, channel, y, x)
+        times_hourly: numpy array of datetime64
+        var_names: list of variable names
+        precip_var: name of precipitation variable (sum instead of mean)
+
+    Returns:
+        data_6h: resampled data (n_6h, channel, y, x)
+        times_6h: 6-hourly timestamps
+    """
+    n_time, n_channel, n_y, n_x = data_hourly.shape
+
+    # Calculate number of complete 6-hour periods
+    n_6h = n_time // 6
+
+    if n_6h == 0:
+        return None, None
+
+    # Trim to exact multiple of 6
+    n_time_trimmed = n_6h * 6
+    data_trimmed = data_hourly[:n_time_trimmed]
+    times_trimmed = times_hourly[:n_time_trimmed]
+
+    # Reshape to (n_6h, 6, channel, y, x)
+    data_reshaped = data_trimmed.reshape(n_6h, 6, n_channel, n_y, n_x)
+
+    # Initialize output
+    data_6h = np.zeros((n_6h, n_channel, n_y, n_x), dtype=np.float32)
+
+    # Process each channel
+    for i, var_name in enumerate(var_names):
+        channel_data = data_reshaped[:, :, i, :, :]  # (n_6h, 6, y, x)
+
+        if var_name == precip_var:
+            # Precipitation: sum over 6 hours
+            with np.errstate(invalid='ignore'):
+                channel_sum = np.nansum(channel_data, axis=1)
+                # Where all 6 values were NaN, set to 0 (ocean)
+                all_nan_mask = np.all(np.isnan(channel_data), axis=1)
+                channel_sum[all_nan_mask] = 0.0
+            data_6h[:, i, :, :] = channel_sum
+        else:
+            # Other variables: mean over 6 hours
+            with np.errstate(invalid='ignore'):
+                data_6h[:, i, :, :] = np.nanmean(channel_data, axis=1)
+
+    # Get timestamps (left label - start of each 6-hour period, matching WRF)
+    times_6h = times_trimmed[0::6]
+
+    return data_6h, times_6h
+
+
+def process_dataset(file_pattern, out_name, precip_var):
+    """Process yearly files: combine AND resample to 6-hourly."""
+
+    out_path = IN_DIR / out_name
+
+    print(f"\n{'='*60}")
+    print(f"PROCESSING: {file_pattern}")
+    print(f"OUTPUT:     {out_name}")
+    print(f"{'='*60}")
+
+    # Clean up old output
+    if out_path.exists():
+        print(f"Removing old output...")
+        shutil.rmtree(out_path)
+
+    # 1. Scan all yearly files to get total size
+    print("\n[1] Scanning yearly files...")
+    file_info = []
+    total_hours = 0
+
+    for year in YEARS:
+        path = IN_DIR / file_pattern.format(year=year)
+        if not path.exists():
+            print(f"  ❌ {year}: File not found")
+            continue
+
+        ds = xr.open_zarr(path)
+        n_hours = len(ds.time)
+        total_hours += n_hours
+
+        file_info.append({
+            'year': year,
+            'path': path,
+            'n_hours': n_hours,
+            'shape': ds['aorc'].shape
+        })
+        print(f"  ✓ {year}: {n_hours} hours")
+        ds.close()
+
+    if not file_info:
+        print("ERROR: No files found!")
+        return
+
+    # Calculate total 6-hourly timesteps
+    total_6h = total_hours // 6
+    print(f"\n  Total hours: {total_hours}")
+    print(f"  Total 6-hourly: {total_6h}")
+
+    # 2. Get metadata from first file
+    print("\n[2] Reading metadata...")
+    ref_ds = xr.open_zarr(file_info[0]['path'])
+
+    n_channel = ref_ds.sizes['channel']
+    n_y = ref_ds.sizes['y']
+    n_x = ref_ds.sizes['x']
+
+    # Get variable names
+    if "aorc_variable" in ref_ds:
+        var_names = [v.decode("utf-8") if isinstance(v, bytes) else str(v)
+                     for v in ref_ds["aorc_variable"].values]
+    else:
+        raise ValueError("Dataset missing 'aorc_variable'")
+
+    # Get coordinates
+    lat = ref_ds['lat'].values if 'lat' in ref_ds else None
+    lon = ref_ds['lon'].values if 'lon' in ref_ds else None
+
+    ref_ds.close()
+
+    print(f"  Shape per timestep: ({n_channel}, {n_y}, {n_x})")
+    print(f"  Variables: {var_names}")
+    print(f"  Precip var: {precip_var}")
+
+    # 3. Create output zarr
+    print("\n[3] Creating output zarr...")
+    print(f"  Output shape: ({total_6h}, {n_channel}, {n_y}, {n_x})")
+
+    store = zarr.DirectoryStore(str(out_path))
+    root = zarr.group(store, overwrite=True)
+
+    # Main data array
+    aorc_arr = root.create_dataset(
+        'aorc',
+        shape=(total_6h, n_channel, n_y, n_x),
+        chunks=(TIME_CHUNK_6H, CHANNEL_CHUNK, n_y, n_x),
+        dtype='float32',
+        compressor=COMPRESSOR,
+        fill_value=np.nan
+    )
+    aorc_arr.attrs['_ARRAY_DIMENSIONS'] = ['time', 'channel', 'y', 'x']
+    aorc_arr.attrs['coordinates'] = 'lat lon aorc_variable'
+
+    # 4. Process each year
+    print("\n[4] Processing years (combine + resample)...")
+
+    out_idx = 0
+    all_times_6h = []
+    leftover_data = None
+    leftover_times = None
+
+    for info in file_info:
+        year = info['year']
+        path = info['path']
+        n_hours = info['n_hours']
+
+        print(f"\n  {year}: Reading {n_hours} hours...", end=" ", flush=True)
+
+        ds = xr.open_zarr(path)
+
+        # Process in chunks to save memory (e.g., 30 days = 720 hours)
+        chunk_size = 720
+        year_data_parts = []
+        year_time_parts = []
+
+        for start in range(0, n_hours, chunk_size):
+            end = min(start + chunk_size, n_hours)
+
+            # Load data
+            data = ds['aorc'].isel(time=slice(start, end)).values
+            times = ds['time'].values[start:end]
+
+            # Clean fill values
+            data = clean_data(data)
+
+            year_data_parts.append(data)
+            year_time_parts.append(times)
+
+        ds.close()
+
+        # Concatenate year data
+        year_data = np.concatenate(year_data_parts, axis=0)
+        year_times = np.concatenate(year_time_parts)
+
+        # Prepend leftover from previous year
+        if leftover_data is not None:
+            year_data = np.concatenate([leftover_data, year_data], axis=0)
+            year_times = np.concatenate([leftover_times, year_times])
+            leftover_data = None
+            leftover_times = None
+
+        # Calculate how many complete 6-hour blocks we have
+        n_complete_6h = len(year_times) // 6
+        n_used_hours = n_complete_6h * 6
+
+        # Save leftover for next year
+        if n_used_hours < len(year_times):
+            leftover_data = year_data[n_used_hours:]
+            leftover_times = year_times[n_used_hours:]
+            year_data = year_data[:n_used_hours]
+            year_times = year_times[:n_used_hours]
+
+        if len(year_data) == 0:
+            print("no complete blocks")
+            continue
+
+        print(f"resampling...", end=" ", flush=True)
+
+        # Resample to 6-hourly
+        data_6h, times_6h = resample_to_6hourly(
+            year_data, year_times, var_names, precip_var
+        )
+
+        if data_6h is None:
+            print("no output")
+            continue
+
+        # Write to output
+        n_out = data_6h.shape[0]
+        print(f"writing {n_out} 6h steps...", end=" ", flush=True)
+
+        aorc_arr[out_idx:out_idx + n_out] = data_6h
+        all_times_6h.append(times_6h)
+        out_idx += n_out
+
+        print("✓")
+
+    # Handle any final leftover (shouldn't happen if years align, but just in case)
+    if leftover_data is not None and len(leftover_data) >= 6:
+        n_final_6h = len(leftover_data) // 6
+        n_final_hours = n_final_6h * 6
+
+        data_6h, times_6h = resample_to_6hourly(
+            leftover_data[:n_final_hours],
+            leftover_times[:n_final_hours],
+            var_names, precip_var
+        )
+
+        if data_6h is not None:
+            n_out = data_6h.shape[0]
+            aorc_arr[out_idx:out_idx + n_out] = data_6h
+            all_times_6h.append(times_6h)
+            out_idx += n_out
+            print(f"  Final leftover: wrote {n_out} 6h steps")
+
+    # 5. Write coordinates
+    print("\n[5] Writing coordinates...")
+
+    # Concatenate all times
+    times_6h_combined = np.concatenate(all_times_6h)
+    actual_6h_count = len(times_6h_combined)
+    print(f"  Actual 6-hourly timesteps: {actual_6h_count}")
+
+    # If we have fewer timesteps than allocated, resize
+    if actual_6h_count < total_6h:
+        print(f"  Note: Allocated {total_6h}, got {actual_6h_count}")
+        # The extra space will just be NaN-filled, which is fine
+
+    # Time
+    time_arr = root.create_dataset(
+        'time',
+        data=times_6h_combined.astype('datetime64[ns]').astype('int64')
+    )
+    time_arr.attrs['_ARRAY_DIMENSIONS'] = ['time']
+    time_arr.attrs['units'] = 'nanoseconds since 1970-01-01'
+    time_arr.attrs['calendar'] = 'proleptic_gregorian'
+
+    # Lat/Lon
+    if lat is not None:
+        lat_arr = root.create_dataset('lat', data=lat)
+        lat_arr.attrs['_ARRAY_DIMENSIONS'] = ['y', 'x']
+
+    if lon is not None:
+        lon_arr = root.create_dataset('lon', data=lon)
+        lon_arr.attrs['_ARRAY_DIMENSIONS'] = ['y', 'x']
+
+    # Variable names
+    var_arr = root.create_dataset('aorc_variable', data=np.array(var_names, dtype='S64'))
+    var_arr.attrs['_ARRAY_DIMENSIONS'] = ['channel']
+
+    # Consolidate metadata
+    zarr.consolidate_metadata(store)
+
+    print(f"\n✅ Done: {out_name}")
+
+    # 6. Verify
+    print("\n[6] Verifying output...")
+    ds_check = xr.open_zarr(out_path)
+    print(f"  Shape: {ds_check['aorc'].shape}")
+    print(f"  Time range: {ds_check.time.values[0]} to {ds_check.time.values[-1]}")
+
+    # Check a sample
+    for idx in [0, actual_6h_count//2, actual_6h_count-1]:
+        if idx < len(ds_check.time):
+            data = ds_check['aorc'].isel(time=idx, channel=5).values
+            nan_pct = 100 * np.isnan(data).sum() / data.size
+            valid_mean = np.nanmean(data) if not np.all(np.isnan(data)) else 0
+            print(f"  idx={idx}: NaN%={nan_pct:.1f}%, mean={valid_mean:.1f}")
+
+    ds_check.close()
+
+
+def main():
+    print("=" * 60)
+    print("COMBINE + RESAMPLE TO 6-HOURLY (Single Pass)")
+    print("=" * 60)
+    print("\nThis script:")
+    print("  1. Reads yearly zarr files")
+    print("  2. Cleans fill values")
+    print("  3. Resamples to 6-hourly")
+    print("  4. Writes combined output")
+    print("\nNo intermediate hourly file needed!")
+
+    for file_pattern, out_name, precip_var in DATASETS:
+        # Check if at least one file exists
+        test_path = IN_DIR / file_pattern.format(year=YEARS[0])
+        if not test_path.exists():
+            print(f"\n⚠️  Skipping {file_pattern} - files not found")
+            continue
+
+        process_dataset(file_pattern, out_name, precip_var)
+
+    print("\n" + "=" * 60)
+    print("ALL DONE!")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+
+# %%

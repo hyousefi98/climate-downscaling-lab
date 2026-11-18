@@ -1,0 +1,97 @@
+#%%
+#!/usr/bin/env python3
+"""
+MERGE CONUS404 (2000-2012)
+Combines yearly regridded Zarr files into a single training-ready dataset.
+"""
+
+from pathlib import Path
+import shutil
+import xarray as xr
+import zarr
+from dask.distributed import Client
+from numcodecs import Blosc
+
+# ================= CONFIGURATION =================
+IN_DIR = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+OUT_ZARR = Path("/scr/hyousefi/corrdiff_datasets/paperdata/conus404_4km_2000_2012.zarr")
+
+YEARS = list(range(2000, 2013))
+
+# Target Chunks (Optimized for training)
+# 672 hours = 28 days (divisible by 24)
+CHUNKS = {"time": 672, "y": 256, "x": 256}
+
+COMPRESSOR = Blosc(cname='zstd', clevel=3, shuffle=Blosc.SHUFFLE)
+
+# ================= MAIN =================
+def combine_conus_years():
+    # 1. Setup Dask
+    client = Client()
+    print(f"Cluster: {client.dashboard_link}")
+
+    if OUT_ZARR.exists():
+        print(f"Removing old combined file: {OUT_ZARR}")
+        shutil.rmtree(OUT_ZARR)
+
+    # 2. Lazy Load Datasets
+    print(f"Scanning {len(YEARS)} yearly files...")
+    ds_list = []
+    
+    for year in YEARS:
+        path = IN_DIR / f"conus404_4km_{year}.zarr"
+        if not path.exists():
+            raise FileNotFoundError(f"Missing year: {path}")
+        
+        # open_zarr is lazy (doesn't read data into RAM)
+        ds = xr.open_zarr(path, consolidated=True)
+        ds_list.append(ds)
+
+    # 3. Concatenate
+    print("Concatenating along time...")
+    # 'minimal' coords prevents duplicating lat/lon in memory
+    ds_combined = xr.concat(ds_list, dim="time", coords="minimal", compat="override")
+
+    # 4. SAFETY FIX: Wipe Encoding
+    # This is crucial. It removes the old "chunk size" metadata from the input files
+    # so Xarray doesn't fight with our new chunking settings.
+    print("Sanitizing encoding...")
+    for var in ds_combined.variables:
+        ds_combined[var].encoding = {}
+
+    # 5. Re-Chunk
+    print(f"Rechunking to {CHUNKS}...")
+    ds_combined = ds_combined.chunk(CHUNKS)
+
+    # 6. Define Encoding for Write
+    # Applies compression to all data variables
+    encoding = {}
+    for var in ds_combined.data_vars:
+        encoding[var] = {
+            "compressor": COMPRESSOR, 
+            "dtype": "float32",
+            "_FillValue": float("nan") # Ensure consistent NaN handling
+        }
+
+    # 7. Write
+    print(f"Writing to {OUT_ZARR}...")
+    ds_combined.to_zarr(
+        OUT_ZARR, 
+        mode="w", 
+        encoding=encoding, 
+        consolidated=True,
+        compute=True
+    )
+    
+    print("\n✓ SUCCESS: Combined CONUS404 dataset created.")
+    print(f"  Path: {OUT_ZARR}")
+
+    # 8. Quick Verification
+    print("\n--- Final Check ---")
+    ds_final = xr.open_zarr(OUT_ZARR, consolidated=True)
+    print(ds_final)
+    print(f"Time Range: {ds_final.time.values[0]} -> {ds_final.time.values[-1]}")
+
+if __name__ == "__main__":
+    combine_conus_years()
+# %%

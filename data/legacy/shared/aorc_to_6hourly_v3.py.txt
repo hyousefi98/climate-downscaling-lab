@@ -1,0 +1,184 @@
+#%%
+#!/usr/bin/env python3
+"""
+FULL 6-HOUR CONVERTER (MULTI-YEAR ROBUST)
+-----------------------------------------
+• FIX 1: Uses Zarr Synchronizer to prevent write collisions during append.
+• FIX 2: Explicitly handles Time Encoding to ensure 2000 and 2001 align perfectly.
+• FIX 3: Cleans Ocean NaNs (-32767) to 0.
+"""
+
+from pathlib import Path
+import shutil
+import numpy as np
+import xarray as xr
+from dask.distributed import Client
+from numcodecs import Blosc
+import zarr
+import pandas as pd
+
+# ================= CONFIGURATION =================
+BASE_DIR = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+
+DATASETS_TO_PROCESS = {
+    # AORC Datasets
+    # "aorc_3km_2000_2012.zarr":          {"type": "stacked", "precip_var": "APCP_surface"},
+    # "aorc_12km_2_3km_2000_2012.zarr":   {"type": "stacked", "precip_var": "APCP_surface"},
+    "aorc_4km_2000_2012.zarr":          {"type": "stacked", "precip_var": "APCP_surface"},
+    "aorc_28km_2_4km_2000_2012.zarr":   {"type": "stacked", "precip_var": "APCP_surface"},
+}
+
+YEARS = list(range(2000, 2013))
+
+CHUNKS_6H = {"time": 240} 
+COMPRESSOR = Blosc(cname='zstd', clevel=3, shuffle=Blosc.SHUFFLE)
+
+# ================= FUNCTIONS =================
+
+def clean_data(da):
+    """Replaces -32767 with NaN."""
+    return da.where(da > -1000)
+
+def process_chunk(ds_chunk, precip_name):
+    """Resamples Hourly -> 6-Hourly."""
+    if "aorc_variable" in ds_chunk:
+        var_list = [v.decode("utf-8") if isinstance(v, bytes) else v 
+                    for v in ds_chunk["aorc_variable"].values]
+    else:
+        raise ValueError("Dataset missing 'aorc_variable'")
+
+    processed_arrays = []
+    da_main = ds_chunk["aorc"]
+    
+    for i, var_name in enumerate(var_list):
+        da_chan = da_main.isel(channel=i).drop_vars(["aorc_variable", "channel"], errors="ignore")
+        da_chan = clean_data(da_chan)
+        
+        resampler = da_chan.resample(time="6h", label="right", closed="right")
+        
+        if var_name == precip_name:
+            # Precip: Sum. Ocean (all NaNs) becomes 0.
+            da_6h = resampler.sum(dim="time", min_count=0) 
+        else:
+            # Temp/Wind: Mean.
+            da_6h = resampler.mean(dim="time")
+            
+        processed_arrays.append(da_6h)
+
+    combined = xr.concat(processed_arrays, dim="channel")
+    ds_out = xr.Dataset({"aorc": combined})
+    
+    # Add metadata back
+    ds_out = ds_out.assign_coords(
+        aorc_variable=("channel", np.array(var_list, dtype="S64"))
+    )
+    for coord in ["lat", "lon"]:
+        if coord in ds_chunk:
+            ds_out[coord] = ds_chunk[coord]
+            
+    return ds_out
+
+def main():
+    client = Client()
+    print(f"Cluster started: {client.dashboard_link}")
+    
+    for filename, config in DATASETS_TO_PROCESS.items():
+        in_path = BASE_DIR / filename
+        out_name = filename.replace(".zarr", "_6h.zarr")
+        out_path = BASE_DIR / out_name
+        sync_path = BASE_DIR / f"{out_name}.sync"
+        
+        print(f"\n{'='*60}")
+        print(f"PROCESSING: {filename}")
+        print(f"OUTPUT:     {out_name}")
+        print(f"{'='*60}")
+        
+        # Cleanup
+        if out_path.exists():
+            shutil.rmtree(out_path)
+        if sync_path.exists():
+            shutil.rmtree(sync_path)
+
+        # Create Synchronizer
+        synchronizer = zarr.ProcessSynchronizer(str(sync_path))
+
+        ds_full = xr.open_zarr(in_path, consolidated=True)
+
+        for i, year in enumerate(YEARS):
+            print(f"  Processing {year}...", end=" ", flush=True)
+            
+            try:
+                # 1. BUFFERED SLICE
+                t_start = f"{year}-01-01"
+                t_end = f"{year+1}-01-01"
+                
+                try:
+                    ds_year = ds_full.sel(time=slice(t_start, t_end))
+                except (KeyError, ValueError):
+                    ds_year = ds_full.sel(time=str(year))
+
+                if ds_year.sizes['time'] == 0:
+                    print(f"[Skipping]")
+                    continue
+
+                # 2. PROCESS & COMPUTE
+                ds_6h = process_chunk(ds_year, config["precip_var"])
+                
+                # Force Compute to RAM to ensure validity
+                print("[Computing]...", end=" ")
+                ds_6h = ds_6h.compute()
+                
+                # 3. WRITE / APPEND
+                if i == 0:
+                    print("[Writing New]...", end=" ")
+                    
+                    # Define Encoding for Time to ensure consistency
+                    # We force units to match pandas timestamps
+                    encoding = {
+                        "aorc": {"compressor": COMPRESSOR, "dtype": "float32", "_FillValue": np.nan},
+                        "time": {"units": "hours since 2000-01-01", "calendar": "proleptic_gregorian"}
+                    }
+                    
+                    ds_6h.to_zarr(
+                        out_path, 
+                        mode='w', 
+                        encoding=encoding, 
+                        synchronizer=synchronizer
+                    )
+                else:
+                    print("[Appending]...", end=" ")
+                    
+                    # CRITICAL FOR APPEND: Drop ALL coords except what we append
+                    # We rely on 'time' being the append dimension.
+                    ds_append = ds_6h.drop_vars(["lat", "lon", "aorc_variable", "x", "y"], errors="ignore")
+                    
+                    # Ensure time encoding matches exactly what was written in step 0
+                    ds_append.time.encoding = {"units": "hours since 2000-01-01", "calendar": "proleptic_gregorian"}
+
+                    ds_append.to_zarr(
+                        out_path, 
+                        mode='a', 
+                        append_dim='time', 
+                        safe_chunks=False,
+                        synchronizer=synchronizer
+                    )
+                
+                print("✓")
+                
+            except Exception as e:
+                print(f"\n❌ Error {year}: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Cleanup Sync
+        if sync_path.exists():
+            shutil.rmtree(sync_path)
+
+        if out_path.exists():
+            print(f"  Consolidating metadata...")
+            zarr.consolidate_metadata(str(out_path))
+            print(f"✅ Finished {out_name}")
+
+if __name__ == "__main__":
+    main()
+# %%

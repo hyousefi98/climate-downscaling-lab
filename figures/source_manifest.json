@@ -1,0 +1,130 @@
+{
+  "kind": "source provenance only; no model/data/results artifacts",
+  "files": [
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_wrf_3km_v4/plot_selected_times_paper_grid.py",
+      "source_sha256": "8c422b4d8074c3aabb7e857d18ddd203eafc8786e623ef84a3297631451639f9",
+      "ported_path": "figures/historical/wrf/plot_selected_times_paper_grid.py",
+      "ported_sha256": "8c422b4d8074c3aabb7e857d18ddd203eafc8786e623ef84a3297631451639f9",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_wrf_3km_v4/plot_precip_fss_prob.py",
+      "source_sha256": "1a8f0ff5553c501ce6a573be4505b6439f787ce7d4f3cdfca07a0cb4b8d6f296",
+      "ported_path": "figures/historical/wrf/plot_precip_fss_prob.py",
+      "ported_sha256": "16b72d2c4ad2c1a4140834bba0e0fa97517212b2af1779abbf2edfc27648dced",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_wrf_3km_v4/paper/plot_fss_journal.py",
+      "source_sha256": "54892fd7afec90ccbd1790da8d211e4280ce46ffd63650cbf8eded66e9c0b6b9",
+      "ported_path": "figures/historical/wrf/paper/plot_fss_journal.py",
+      "ported_sha256": "54892fd7afec90ccbd1790da8d211e4280ce46ffd63650cbf8eded66e9c0b6b9",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_wrf_3km_v4/paper/plot_spectra_all_variables_journal.py",
+      "source_sha256": "99c1109eb124aceff3bdbe8cc5d44f7bd76dcfd694784057dd9dfccf8bef7898",
+      "ported_path": "figures/historical/wrf/paper/plot_spectra_all_variables_journal.py",
+      "ported_sha256": "e93c07a367a2c0b3c07aff7c0157545ebcef5a544a811129688a4a1819c85a66",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_wrf_3km_v4/inference/plot_single_sample_wrf_time.py",
+      "source_sha256": "8d1da558dd15c8e2a8da126f65f2a97e0139c5e2202287a089150277aa8ac91f",
+      "ported_path": "figures/historical/wrf/inference/plot_single_sample_wrf_time.py",
+      "ported_sha256": "9b24c461e289213a8c0d8ccc1d32a9e72e46cf2a541610f212dd755205882c9a",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "corrdiff_wrf_3km_v4",
+          "portable_default": "artifacts/wrf"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_conus404_era5_4km_v1/plot_selected_times_paper_grid.py",
+      "source_sha256": "f3138330505a77a9554b0f67a0e7a31287a304dc350d8c75229a0b6e8af12695",
+      "ported_path": "figures/historical/era5_conus404/plot_selected_times_paper_grid.py",
+      "ported_sha256": "f3138330505a77a9554b0f67a0e7a31287a304dc350d8c75229a0b6e8af12695",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_conus404_era5_4km_v1/plot_precip_fss_prob_conus404.py",
+      "source_sha256": "ee18b855adff843e32e04ccb03a878271ca920d9b67be66944365c4b608800ab",
+      "ported_path": "figures/historical/era5_conus404/plot_precip_fss_prob_conus404.py",
+      "ported_sha256": "6fdf638e39948af8cae41ceb8bca9b083506b1245dea48c2f8ab8dfb819214ec",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_conus404_era5_4km_v1/paper/code/plot_qq_q95_spectra_journal.py",
+      "source_sha256": "a6e074620c3dce951dee2197986f094351ef5928e72e41c2057f6d8baf12e292",
+      "ported_path": "figures/historical/era5_conus404/paper/code/plot_qq_q95_spectra_journal.py",
+      "ported_sha256": "e5c3f4f344b7c0a7acf4ec15ae6cc09890c71a8f4edf7f9a6f4b1541581cc898",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_conus404_era5_4km_v1/paper/code/plot_spectra_all_variables_journal.py",
+      "source_sha256": "39d8119e34f886c036b64fab89e7f90c1fdd04920d8b4fd9672d769766f8db9a",
+      "ported_path": "figures/historical/era5_conus404/paper/code/plot_spectra_all_variables_journal.py",
+      "ported_sha256": "015831cac493dab9b64fadc09b6ccc955092211168d478d4f8ed90b285548984",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "corrdiff_conus404_era5_4km_v1/inference/plot_single_sample_wrf_time.py",
+      "source_sha256": "031797d34fed94f0768c53506314c9477d6e925f823c59eee3315cc13911d5a5",
+      "ported_path": "figures/historical/era5_conus404/inference/plot_single_sample_wrf_time.py",
+      "ported_sha256": "a2369f668d522971291e1efd5e9f227dbb8b34d10ee9ba01c2b67ff8953279a4",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": [
+        {
+          "old_alias": "corrdiff_conus404_era5_4km_v1",
+          "portable_default": "artifacts/era5_conus404"
+        }
+      ]
+    }
+  ]
+}

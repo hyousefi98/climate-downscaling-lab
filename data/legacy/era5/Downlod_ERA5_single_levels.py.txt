@@ -1,0 +1,65 @@
+# %%
+#!/usr/bin/env python
+# ──────────────────────────────────────────────────────────────────────────────
+# ERA5 SINGLE-LEVELS DOWNLOADER  (one variable × one year per request)
+# Writes to:  /home/hyousefi/data/era5/single_levels/<variable>/
+#                                                                          2020-2024
+# ──────────────────────────────────────────────────────────────────────────────
+import cdsapi, os, pathlib
+
+# ----------------------------------------------------------------------------- CONFIG
+OUT_DIR  = pathlib.Path("/home/hyousefi/data/era5/single_levels_2020_2023")
+# YEARS    = ["2023"]# ["2020", "2021", "2022"]
+YEARS    = [str(y) for y in range(2000, 2024)]    # 2020-2024
+
+# YEARS    = [ "2018", "2019" , "2020", "2021", "2022"]
+
+# YEARS    = [str(y) for y in range(2017, 2023)]
+VARIABLES= [
+    "10m_u_component_of_wind",
+    "10m_v_component_of_wind",
+    "2m_temperature",
+    "surface_pressure",
+    "total_precipitation",
+    "surface_solar_radiation_downwards",
+    "surface_thermal_radiation_downward_clear_sky",
+]
+MONTHS   = [f"{m:02d}" for m in range(1, 13)]
+DAYS     = [f"{d:02d}" for d in range(1, 32)]
+TIMES    = [f"{h:02d}:00" for h in range(24)]
+# AREA_BOX = [40.5, -118, 28, -105]         # N, W, S, E    (Arizona + vicinity)
+# AREA_BOX = [34.18, -87.34, 31.76, -82.61]
+YEARS    = [str(y) for y in range(2000, 2024)]    # 2020-2024
+
+
+AREA_BOX = [40.5, -118, 28, -105]  
+# ----------------------------------------------------------------------------- CLIENT
+c = cdsapi.Client()                         # uses ~/.cdsapirc
+
+# ----------------------------------------------------------------------------- LOOP
+for var in VARIABLES:
+    var_dir = OUT_DIR / var
+    var_dir.mkdir(parents=True, exist_ok=True)
+
+    for yr in YEARS:
+        out_nc = var_dir / f"era5_sl_{var}_{yr}.nc"
+        if out_nc.exists():                     # skip if already downloaded
+            print(f"[skip] {out_nc} exists")
+            continue
+
+        print(f"[request] {out_nc.name}")
+        req = {
+            "product_type":   "reanalysis",
+            "variable":       var,
+            "year":           yr,
+            "month":          MONTHS,
+            "day":            DAYS,
+            "time":           TIMES,
+            "area":           AREA_BOX,
+            "format":         "netcdf",         # CDS uses 'format'
+        }
+
+        # send request & download
+        c.retrieve("reanalysis-era5-single-levels", req, str(out_nc))
+
+print("✅ all requested files downloaded")

@@ -1,0 +1,294 @@
+#%%
+#!/usr/bin/env python3
+"""
+FULL 6-HOUR CONVERTER v4 (FIXED - NO CHUNK CORRUPTION)
+-------------------------------------------------------
+FIXES from v3:
+• FIX 1: Removed safe_chunks=False (caused chunk corruption)
+• FIX 2: Removed Dask distributed Client (caused timeouts)
+• FIX 3: Uses direct zarr writes instead of xarray append
+• FIX 4: Fixed fill value threshold to -32000 (was -1000)
+• FIX 5: Fixed year boundary slicing to avoid duplicates
+• FIX 6: Processes data in memory-safe chunks
+"""
+
+from pathlib import Path
+import shutil
+import numpy as np
+import xarray as xr
+import zarr
+from numcodecs import Blosc
+
+# ================= CONFIGURATION =================
+BASE_DIR = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+
+DATASETS_TO_PROCESS = {
+    # AORC Datasets - uncomment as needed
+    # "aorc_3km_2000_2012.zarr":          {"type": "stacked", "precip_var": "APCP_surface"},
+    # "aorc_12km_2_3km_2000_2012.zarr":   {"type": "stacked", "precip_var": "APCP_surface"},
+    "aorc_4km_2000_2012.zarr":          {"type": "stacked", "precip_var": "APCP_surface"},
+    "aorc_28km_2_4km_2000_2012.zarr":   {"type": "stacked", "precip_var": "APCP_surface"},
+}
+
+# Output chunking
+TIME_CHUNK_6H = 240
+CHANNEL_CHUNK = 8
+COMPRESSOR = Blosc(cname='zstd', clevel=3, shuffle=Blosc.SHUFFLE)
+
+# Fill value threshold (consistent with other preprocessing code)
+FILL_VALUE_THRESHOLD = -32000
+
+
+# ================= FUNCTIONS =================
+
+def clean_data(data):
+    """Replaces fill values (<-32000) with NaN."""
+    return np.where(data > FILL_VALUE_THRESHOLD, data, np.nan)
+
+
+def resample_to_6hourly(data_hourly, times_hourly, var_names, precip_var):
+    """
+    Resample hourly data to 6-hourly.
+
+    Args:
+        data_hourly: numpy array (time, channel, y, x)
+        times_hourly: numpy array of datetime64
+        var_names: list of variable names
+        precip_var: name of precipitation variable (to use sum instead of mean)
+
+    Returns:
+        data_6h: resampled data
+        times_6h: 6-hourly timestamps
+    """
+    n_time, n_channel, n_y, n_x = data_hourly.shape
+
+    # Calculate number of 6-hour periods (floor division)
+    n_6h = n_time // 6
+
+    if n_6h == 0:
+        return None, None
+
+    # Trim to exact multiple of 6
+    n_time_trimmed = n_6h * 6
+    data_trimmed = data_hourly[:n_time_trimmed]
+    times_trimmed = times_hourly[:n_time_trimmed]
+
+    # Reshape to (n_6h, 6, channel, y, x)
+    data_reshaped = data_trimmed.reshape(n_6h, 6, n_channel, n_y, n_x)
+
+    # Initialize output
+    data_6h = np.zeros((n_6h, n_channel, n_y, n_x), dtype=np.float32)
+
+    # Process each channel
+    for i, var_name in enumerate(var_names):
+        channel_data = data_reshaped[:, :, i, :, :]  # (n_6h, 6, y, x)
+
+        if var_name == precip_var:
+            # Precipitation: sum over 6 hours
+            # Use nansum, but replace all-NaN with 0 (ocean areas)
+            with np.errstate(invalid='ignore'):
+                channel_sum = np.nansum(channel_data, axis=1)
+                # Where all 6 values were NaN, set to 0
+                all_nan_mask = np.all(np.isnan(channel_data), axis=1)
+                channel_sum[all_nan_mask] = 0.0
+            data_6h[:, i, :, :] = channel_sum
+        else:
+            # Other variables: mean over 6 hours
+            with np.errstate(invalid='ignore'):
+                data_6h[:, i, :, :] = np.nanmean(channel_data, axis=1)
+
+    # Get timestamps (use the last hour of each 6-hour period, i.e., "right" label)
+    times_6h = times_trimmed[5::6]  # Every 6th starting from index 5
+
+    return data_6h, times_6h
+
+
+def process_dataset(in_path, out_path, precip_var):
+    """Process a single dataset from hourly to 6-hourly."""
+
+    print(f"\n{'='*60}")
+    print(f"PROCESSING: {in_path.name}")
+    print(f"OUTPUT:     {out_path.name}")
+    print(f"{'='*60}")
+
+    # Clean up old output
+    if out_path.exists():
+        print(f"Removing old output...")
+        shutil.rmtree(out_path)
+
+    # 1. Open input and get metadata
+    print("\n[1] Reading input metadata...")
+    ds_in = xr.open_zarr(in_path, consolidated=True)
+
+    n_time_in = ds_in.sizes['time']
+    n_channel = ds_in.sizes['channel']
+    n_y = ds_in.sizes['y']
+    n_x = ds_in.sizes['x']
+
+    print(f"    Input shape: ({n_time_in}, {n_channel}, {n_y}, {n_x})")
+
+    # Get variable names
+    if "aorc_variable" in ds_in:
+        var_names = [v.decode("utf-8") if isinstance(v, bytes) else str(v)
+                     for v in ds_in["aorc_variable"].values]
+    else:
+        raise ValueError("Dataset missing 'aorc_variable'")
+
+    print(f"    Variables: {var_names}")
+    print(f"    Precip var: {precip_var}")
+
+    # Get coordinates
+    lat = ds_in['lat'].values if 'lat' in ds_in else None
+    lon = ds_in['lon'].values if 'lon' in ds_in else None
+    times_in = ds_in['time'].values
+
+    # Calculate output size
+    n_time_out = n_time_in // 6
+    print(f"    Output timesteps: {n_time_out}")
+
+    # 2. Create output zarr structure
+    print("\n[2] Creating output zarr...")
+
+    store = zarr.DirectoryStore(str(out_path))
+    root = zarr.group(store, overwrite=True)
+
+    # Create main data array
+    aorc_arr = root.create_dataset(
+        'aorc',
+        shape=(n_time_out, n_channel, n_y, n_x),
+        chunks=(TIME_CHUNK_6H, CHANNEL_CHUNK, n_y, n_x),
+        dtype='float32',
+        compressor=COMPRESSOR,
+        fill_value=np.nan
+    )
+    aorc_arr.attrs['_ARRAY_DIMENSIONS'] = ['time', 'channel', 'y', 'x']
+    aorc_arr.attrs['coordinates'] = 'lat lon aorc_variable'
+
+    # 3. Process in chunks to avoid memory issues
+    print("\n[3] Processing data...")
+
+    # Process in chunks of ~30 days (720 hours -> 120 6-hourly)
+    chunk_size_hours = 720  # 30 days
+    all_times_6h = []
+    out_idx = 0
+
+    for start_idx in range(0, n_time_in, chunk_size_hours):
+        end_idx = min(start_idx + chunk_size_hours, n_time_in)
+
+        # Make sure we have complete 6-hour blocks
+        # Extend end_idx to include complete blocks if possible
+        actual_hours = end_idx - start_idx
+        complete_blocks = actual_hours // 6
+
+        if complete_blocks == 0:
+            continue
+
+        # Adjust to process only complete 6-hour blocks
+        end_idx = start_idx + (complete_blocks * 6)
+
+        progress = 100 * start_idx / n_time_in
+        print(f"    Processing hours {start_idx}-{end_idx} ({progress:.1f}%)...", end=" ", flush=True)
+
+        # Load chunk
+        data_chunk = ds_in['aorc'].isel(time=slice(start_idx, end_idx)).values
+        times_chunk = times_in[start_idx:end_idx]
+
+        # Clean fill values
+        data_chunk = clean_data(data_chunk)
+
+        # Resample to 6-hourly
+        data_6h, times_6h = resample_to_6hourly(
+            data_chunk, times_chunk, var_names, precip_var
+        )
+
+        if data_6h is None:
+            print("skipped (incomplete)")
+            continue
+
+        # Write to output
+        n_out = data_6h.shape[0]
+        aorc_arr[out_idx:out_idx + n_out] = data_6h
+        all_times_6h.append(times_6h)
+        out_idx += n_out
+
+        print(f"wrote {n_out} timesteps")
+
+    # 4. Write coordinates
+    print("\n[4] Writing coordinates...")
+
+    # Concatenate all times
+    times_6h_combined = np.concatenate(all_times_6h)
+    print(f"    Total 6-hourly timesteps: {len(times_6h_combined)}")
+
+    # Time coordinate
+    time_arr = root.create_dataset(
+        'time',
+        data=times_6h_combined.astype('datetime64[ns]').astype('int64')
+    )
+    time_arr.attrs['_ARRAY_DIMENSIONS'] = ['time']
+    time_arr.attrs['units'] = 'nanoseconds since 1970-01-01'
+    time_arr.attrs['calendar'] = 'proleptic_gregorian'
+
+    # Lat/Lon
+    if lat is not None:
+        lat_arr = root.create_dataset('lat', data=lat)
+        lat_arr.attrs['_ARRAY_DIMENSIONS'] = ['y', 'x']
+
+    if lon is not None:
+        lon_arr = root.create_dataset('lon', data=lon)
+        lon_arr.attrs['_ARRAY_DIMENSIONS'] = ['y', 'x']
+
+    # Variable names
+    var_arr = root.create_dataset('aorc_variable', data=np.array(var_names, dtype='S64'))
+    var_arr.attrs['_ARRAY_DIMENSIONS'] = ['channel']
+
+    # Consolidate metadata
+    zarr.consolidate_metadata(store)
+
+    # Close input
+    ds_in.close()
+
+    print(f"\n✅ Finished: {out_path.name}")
+
+    # 5. Verify output
+    print("\n[5] Verifying output...")
+    ds_check = xr.open_zarr(out_path)
+    print(f"    Shape: {ds_check['aorc'].shape}")
+    print(f"    Time range: {ds_check.time.values[0]} to {ds_check.time.values[-1]}")
+
+    # Sample a few timesteps
+    for idx in [0, len(ds_check.time)//2, -1]:
+        data = ds_check['aorc'].isel(time=idx, channel=0).values
+        nan_pct = 100 * np.isnan(data).sum() / data.size
+        print(f"    idx={idx}: NaN%={nan_pct:.1f}%")
+
+    ds_check.close()
+
+
+def main():
+    print("=" * 60)
+    print("AORC HOURLY -> 6-HOURLY CONVERTER (v4 - FIXED)")
+    print("=" * 60)
+    print("\nNo Dask distributed client - running sequentially")
+    print("No safe_chunks=False - no chunk corruption")
+
+    for filename, config in DATASETS_TO_PROCESS.items():
+        in_path = BASE_DIR / filename
+        out_name = filename.replace(".zarr", "_6h.zarr")
+        out_path = BASE_DIR / out_name
+
+        if not in_path.exists():
+            print(f"\n⚠️  Skipping {filename} - file not found")
+            continue
+
+        process_dataset(in_path, out_path, config["precip_var"])
+
+    print("\n" + "=" * 60)
+    print("ALL DONE!")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+
+# %%

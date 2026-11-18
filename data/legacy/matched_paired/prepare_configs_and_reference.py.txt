@@ -1,0 +1,121 @@
+"""CPU preparation of shared configs and exact writer-equivalent target values."""
+import ast
+import copy
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+import netCDF4 as nc
+import numpy as np
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
+sys.path.insert(0, str(ROOT))
+from paired_dataset import AlignedPairedDataset, CHANNELS
+
+
+def sha(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def main():
+    with nc.Dataset(ROOT / "all_aorc_12km_to_3km.nc") as base:
+        old = ast.literal_eval(base.cfg)
+        t = base["time"]
+        dates = [d.strftime("%Y-%m-%dT%H:%M:%S") for d in nc.num2date(t[:], t.units, getattr(t, "calendar", "standard"))]
+        base_mask = np.isfinite(np.ma.filled(base["truth"]["APCPsurface"][0], np.nan))
+    (HERE / "requested_times.json").write_text(json.dumps(dates, indent=2) + "\n")
+    stats_path = old["dataset"]["stats_path"]
+    cfgs = {}
+    for mode in ("synthetic", "wrf"):
+        cfg = copy.deepcopy(old)
+        cfg["dataset"] = {
+            "type": str(HERE / "paired_dataset.py") + "::AlignedPairedDataset",
+            "input_source": mode, "aligned_path": str(HERE / "aligned_inputs.nc"),
+            "stats_path": stats_path, "precip_threshold": 0.1,
+            "coastal_buffer_pixels": 10,
+            "wrf_input_path": "/scr/hyousefi/corrdiff_datasets/paperdata/wrf_12km_on_aorc_3km_2000_2012.zarr",
+        }
+        cfg["generation"].update(times=dates, times_range=None, random_samples=None,
+                                 num_ensembles=4, seed_batch_size=1)
+        cfg["generation"]["io"]["output_filename"] = str(HERE / mode / "full/predictions.nc")
+        cfgs[mode] = cfg
+        (HERE / f"config_{mode}.json").write_text(json.dumps(cfg, indent=2) + "\n")
+    # Both arms must differ only in input selection and output destination.
+    a, b = copy.deepcopy(cfgs["synthetic"]), copy.deepcopy(cfgs["wrf"])
+    for cfg in (a, b):
+        cfg["dataset"].pop("input_source")
+        cfg["generation"]["io"].pop("output_filename")
+    assert a == b
+
+    datasets = {mode: AlignedPairedDataset(**{k: v for k, v in cfg["dataset"].items() if k != "type"})
+                for mode, cfg in cfgs.items()}
+    dataset = datasets["synthetic"]
+    assert np.array_equal(base_mask, dataset.loss_mask)
+    assert [t.strftime("%Y-%m-%dT%H:%M:%S") for t in dataset.time()] == dates
+    reference_path = HERE / "reference_model_units.nc"
+    if reference_path.exists():
+        raise FileExistsError(reference_path)
+    checks = []
+    with nc.Dataset(reference_path, "w") as ref:
+        for dim, size in (("time", 200), ("y", 288), ("x", 480)):
+            ref.createDimension(dim, size)
+        t = ref.createVariable("time", "f8", ("time",))
+        t.units = "seconds since 1970-01-01 00:00:00"
+        t.calendar = "standard"
+        t[:] = nc.date2num(dataset.time(), t.units, t.calendar)
+        for coord, values in (("lat", dataset.latitude()), ("lon", dataset.longitude())):
+            ref.createVariable(coord, values.dtype, ("y", "x"))[:] = values
+        ref.createVariable("verification_mask", "i1", ("y", "x"))[:] = dataset.loss_mask
+        group = ref.createGroup("truth")
+        names = [m.name + m.level for m in dataset.output_channels()]
+        variables = [group.createVariable(name, "f4", ("time", "y", "x"),
+                                         zlib=True, complevel=1, chunksizes=(1, 288, 480), fill_value=np.nan)
+                     for name in names]
+        for i in range(200):
+            target, synthetic_input = dataset[i]
+            wrf_target, wrf_input = datasets["wrf"][i]
+            assert np.array_equal(target.numpy(), wrf_target.numpy(), equal_nan=True)
+            values = target.numpy()[None].copy()
+            values[:, :, ~dataset.loss_mask] = np.nan
+            physical = dataset.denormalize_output(values)[0]
+            for channel, variable in enumerate(variables):
+                variable[i] = physical[channel]
+            if i in (0, 3, 111, 199):
+                checks.append({"index": i, "time": dates[i],
+                               "shared_target_exact": True,
+                               "synthetic_normalized_min": float(synthetic_input.numpy()[:, dataset.loss_mask].min()),
+                               "synthetic_normalized_max": float(synthetic_input.numpy()[:, dataset.loss_mask].max()),
+                               "wrf_normalized_min": float(wrf_input.numpy()[:, dataset.loss_mask].min()),
+                               "wrf_normalized_max": float(wrf_input.numpy()[:, dataset.loss_mask].max()),
+                               "reference_precip_max_mm": float(np.nanmax(physical[0]))})
+            if (i + 1) % 25 == 0:
+                print(f"Validated shared inputs/reference: {i + 1}/200", flush=True)
+        ref.reference_description = "Aligned AORC six-hour windows ending at timestamp; exact float32 target normalization/denormalization roundtrip of original AORC generator."
+        ref.humidity_convention = "SPFH2maboveground is 10 times physical specific humidity; divide by 10 for kg/kg metrics."
+        ref.pressure_convention = "PRESsurface is hPa."
+        ref.interval = "Precipitation sums hourly labels t-5 through t, representing (t-6 hours,t]; other AORC fields are means of these six records."
+    for ds in datasets.values():
+        ds.close()
+    sources = [ROOT / "generate.py", ROOT / "datasets/aorc_downscaling.py", ROOT / "helpers/generate_helpers.py",
+               Path(stats_path), Path(old["generation"]["residual_std_path"]), HERE / "paired_dataset.py",
+               HERE / "aligned_inputs.nc", reference_path]
+    sources += [Path(old["generation"]["io"][key]) for key in ("reg_ckpt_filename", "res_ckpt_filename")]
+    (HERE / "source_hashes.json").write_text(json.dumps({str(p): {"bytes": p.stat().st_size, "sha256": sha(p)} for p in sources}, indent=2) + "\n")
+    (HERE / "paired_preflight.json").write_text(json.dumps({"passed": True, "cases": 200,
+        "identical_target_every_case": True, "identical_configuration_except_input_source_and_output_path": True,
+        "valid_cells": 128619, "all_inputs_finite_on_support": True, "spot_checks": checks,
+        "reference_path": str(reference_path),
+        "limitations": ["WRF Q2 interpreted as standard mixing ratio; original archive conversion history incomplete.",
+                        "WRF wind components retained as archived; rotation provenance unverified.",
+                        "WRF nonprecipitation temporal averaging semantics unverified."]}, indent=2) + "\n")
+    print("Shared reference and all 200 paired inputs validated.", flush=True)
+
+
+if __name__ == "__main__":
+    main()

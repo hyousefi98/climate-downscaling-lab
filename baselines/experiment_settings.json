@@ -1,0 +1,59 @@
+{
+  "kind": "Verified training settings and source provenance, not fitted parameters or performance results.",
+  "random_forest": {
+    "artifact_alias": "rfmodel_3km/rf_3km_big.joblib",
+    "evidence": "Read-only nonexecuting pickle opcode inspection before any tree arrays, first 64 KiB only. The associated paper prediction file has no global model metadata, so the artifact-to-prediction link remains based on the provenance audit.",
+    "parameters": {
+      "n_estimators": 2000,
+      "max_depth": 35,
+      "min_samples_leaf": 8,
+      "min_samples_split": 2,
+      "max_features": "sqrt",
+      "bootstrap": true,
+      "oob_score": true,
+      "random_state": 42,
+      "n_jobs": 16
+    },
+    "training_samples": 4000000,
+    "features": 31,
+    "outputs": 8,
+    "sklearn_version": "1.7.2",
+    "feature_interpretation": "31 is consistent with eight variables, y/x, lat/lon, landmask, month/day-of-year, eight daily normals, and eight anomalies; exact historical flags and climatology sampling were not embedded in the artifact.",
+    "alternate_artifact": {
+      "alias": "rf_3km.joblib",
+      "same_hyperparameters": true,
+      "training_samples": 8000000
+    },
+    "new_workflow": "Training now embeds feature schema, normalization/grid fingerprint and fitted training climatology in the estimator. Generation restores this state. Legacy recomputation requires an explicit opt-in and does not represent a training-only workflow."
+  },
+  "ridge": {
+    "source_alias": "rfmodel_3km/multivariate_baseline_coeffs.json",
+    "source_sha256": "836ee779adc34dc4658b303b05eb21b4ee76ae9e6a47df61536170e97079dc70",
+    "mode": "multivariate",
+    "alpha": 1e-06,
+    "training_samples": 1000000,
+    "input_variables": [
+      "APCPsurface",
+      "DLWRFsurface",
+      "DSWRFsurface",
+      "PRESsurface",
+      "SPFH2maboveground",
+      "TMP2maboveground",
+      "UGRD10maboveground",
+      "VGRD10maboveground"
+    ],
+    "output_variables": [
+      "APCPsurface",
+      "DLWRFsurface",
+      "DSWRFsurface",
+      "PRESsurface",
+      "SPFH2maboveground",
+      "TMP2maboveground",
+      "UGRD10maboveground",
+      "VGRD10maboveground"
+    ],
+    "intercept_penalized": false
+  },
+  "historical_loader": "Archived packed AORC scaling/time/missing-value semantics require explicit aorc_legacy configuration, which rejects physical stores and stats. New defaults use shared physical_pair and never apply packed-number scales.",
+  "evaluation_samples": "Original classical baseline outputs contain early-2012 samples; do not assert they match the all-year deep-learning evaluation without explicit reference/time checks."
+}

@@ -1,0 +1,155 @@
+#%%
+import zarr
+
+z = zarr.open_array("/scr/hyousefi/aorc/2000.zarr/APCP_surface", mode="r")
+
+print("shape:", z.shape)
+print("chunks:", z.chunks)
+print("dtype:", z.dtype)
+print("attrs:", dict(z.attrs))
+
+import zarr
+import numpy as np
+
+root = "/scr/hyousefi/aorc/2000.zarr"
+
+lat = zarr.open_array(f"{root}/latitude", mode="r")
+lon = zarr.open_array(f"{root}/longitude", mode="r")
+
+print("Latitude:")
+print("  shape:", lat.shape)
+print("  min:", float(lat[:].min()))
+print("  max:", float(lat[:].max()))
+
+print("\nLongitude:")
+print("  shape:", lon.shape)
+print("  min:", float(lon[:].min()))
+print("  max:", float(lon[:].max()))
+
+import numpy as np
+import zarr
+
+root = "/scr/hyousefi/aorc/2000.zarr"
+
+lat = zarr.open_array(f"{root}/latitude", mode="r")[:]
+lon = zarr.open_array(f"{root}/longitude", mode="r")[:]
+
+# Differences
+dlat = np.diff(lat)
+dlon = np.diff(lon)
+
+print("Latitude resolution (degrees):")
+print("  mean :", dlat.mean())
+print("  min  :", dlat.min())
+print("  max  :", dlat.max())
+
+print("\nLongitude resolution (degrees):")
+print("  mean :", dlon.mean())
+print("  min  :", dlon.min())
+print("  max  :", dlon.max())
+
+
+# Mean latitude for scaling longitude
+lat_mean = lat.mean()
+
+lat_km = dlat.mean() * 111.32
+lon_km = dlon.mean() * 111.32 * np.cos(np.deg2rad(lat_mean))
+
+print("\nApprox resolution in km:")
+print(f"  Δlat ≈ {lat_km:.3f} km")
+print(f"  Δlon ≈ {lon_km:.3f} km (at lat {lat_mean:.2f}°)")
+
+# %%
+import numpy as np
+import xarray as xr
+from pathlib import Path
+
+# ============================================================
+# 1. User settings
+# ============================================================
+
+# Bounding box (degrees)
+LAT_MIN, LAT_MAX = 30.5, 38.0
+LON_MIN, LON_MAX = -117.5, -105.00   # confirm this is correct
+
+# AORC base resolution (from your analysis)
+BASE_DEG = 0.008333   # ≈ 1 km
+
+# Target resolutions as multiples of base grid
+TARGETS = {
+    "1km": 1,
+    "3km": 3,
+    "4km": 4,
+    "12km": 12,
+    "28km": 28,
+}
+
+# Output directory
+OUT_DIR = Path("./aorc_reference_grids")
+OUT_DIR.mkdir(exist_ok=True)
+
+# ============================================================
+# 2. Helper: build coordinate safely
+# ============================================================
+
+def build_coord(vmin, vmax, step):
+    """
+    Build a coordinate array with fixed spacing, avoiding floating errors.
+    """
+    n = int(np.floor((vmax - vmin) / step)) + 1
+    coord = vmin + step * np.arange(n)
+    coord = coord[coord <= vmax + step * 1e-6]
+    return np.round(coord, 10)
+
+# ============================================================
+# 3. Build grids
+# ============================================================
+
+for name, mult in TARGETS.items():
+    step = BASE_DEG * mult
+
+    lat = build_coord(LAT_MIN, LAT_MAX, step)
+    lon = build_coord(LON_MIN, LON_MAX, step)
+
+    # 2D mesh (optional but very useful)
+    LAT2D, LON2D = np.meshgrid(lat, lon, indexing="ij")
+
+    ds = xr.Dataset(
+        coords={
+            "lat": ("lat", lat),
+            "lon": ("lon", lon),
+        },
+        data_vars={
+            "LAT2D": (("lat", "lon"), LAT2D.astype(np.float32)),
+            "LON2D": (("lat", "lon"), LON2D.astype(np.float32)),
+        },
+        attrs={
+            "title": f"AORC-derived reference grid ({name})",
+            "crs": "EPSG:4326",
+            "base_resolution_deg": BASE_DEG,
+            "resolution_deg": step,
+            "resolution_multiple_of_1km": mult,
+            "lat_min": LAT_MIN,
+            "lat_max": LAT_MAX,
+            "lon_min": LON_MIN,
+            "lon_max": LON_MAX,
+            "note": "Grid derived from AORC 1-km spacing using exact degree multiples",
+        },
+    )
+
+    # NetCDF encoding (clean + compact)
+    encoding = {
+        "lat": {"dtype": "float32"},
+        "lon": {"dtype": "float32"},
+        "LAT2D": {"dtype": "float32", "zlib": True, "complevel": 4},
+        "LON2D": {"dtype": "float32", "zlib": True, "complevel": 4},
+    }
+
+    out_file = OUT_DIR / f"aorc_refgrid_{name}.nc"
+    ds.to_netcdf(out_file, encoding=encoding)
+
+    print(f"✔ wrote {out_file}  | shape = {LAT2D.shape}")
+
+print("\nAll reference grids created successfully.")
+
+# %%

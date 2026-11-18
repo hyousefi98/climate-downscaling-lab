@@ -1,0 +1,108 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+# Composed from archived NVIDIA-derived experiment configuration.
+# Historical configuration snapshot; not a guarantee of exact checkpoint lineage.
+dataset:
+  type: aorc
+  input_data_path: ${oc.env:DG_DATA_ROOT,./data_local}/aorc_12km_2_3km_2000_2012_6h.zarr
+  target_data_path: ${oc.env:DG_DATA_ROOT,./data_local}/aorc_3km_2000_2012_6h.zarr
+  stats_path: ${oc.env:DG_DATA_ROOT,./data_local}/aorc_stats_3km.json
+  train: true
+  train_years:
+  - 2000
+  - 2011
+  valid_years:
+  - 2012
+  - 2012
+  apply_precip_factor: true
+  apply_scale_factors: true
+  clip_negative: true
+  precip_threshold: 0.1
+  landmask_path: ${oc.env:DG_DATA_ROOT,./data_local}/aorc_land_mask_3km.nc
+  mask_ocean_in_target: true
+  keep_ocean_as_nan: true
+  sanitize_inputs: true
+  coastal_buffer_pixels: 5
+  debug_nan: true
+  debug_nan_limit: 20
+  drop_nan_land_timesteps: true
+  nan_chunk: 128
+  nan_check_vars: null
+  input_variables:
+  - APCP_surface
+  - DLWRF_surface
+  - DSWRF_surface
+  - PRES_surface
+  - SPFH_2maboveground
+  - TMP_2maboveground
+  - UGRD_10maboveground
+  - VGRD_10maboveground
+  output_variables:
+  - APCP_surface
+  - DLWRF_surface
+  - DSWRF_surface
+  - PRES_surface
+  - SPFH_2maboveground
+  - TMP_2maboveground
+  - UGRD_10maboveground
+  - VGRD_10maboveground
+model:
+  name: diffusion
+  hr_mean_conditioning: true
+  model_args:
+    gridtype: sinusoidal
+    N_grid_channels: 4
+    embedding_type: zero
+    model_channels: 128
+    channel_mult:
+    - 1
+    - 2
+    - 2
+    - 2
+    - 2
+    attn_resolutions:
+    - 28
+    sigma_data: 1.0
+training:
+  hp:
+    training_duration: 5000000
+    total_batch_size: 64
+    batch_size_per_gpu: 16
+    lr: 0.0002
+    grad_clip_threshold: 1.0
+    lr_decay: 0.9999
+    lr_rampup: 50000
+    lr_decay_rate: 100000
+    residual_std_path: ${oc.env:DG_ARTIFACT_ROOT,./artifacts}/residual_std_aorc.json
+    P_mean: 0.0
+    P_std: 1.0
+    weight_clip_max: 50.0
+    loss_clip_max: null
+    ema_enabled: true
+    ema_decay: 0.9999
+    ema_warmup: true
+  perf:
+    fp_optimizations: amp-bf16
+    dataloader_workers: 8
+    songunet_checkpoint_level: 2
+    prefetch_factor: 4
+    persistent_workers: true
+    sampler_mode: chunked
+    sampler_chunk_size: 240
+    sampler_shuffle: true
+    sampler_shuffle_within_chunk: true
+    apply_loss_mask_to_inputs: false
+  io:
+    regression_checkpoint_path: ${oc.env:DG_CHECKPOINT_ROOT,./checkpoints}/aorc/UNet.0.200000.mdlus
+    print_progress_freq: 1000
+    save_checkpoint_freq: 5000
+    save_n_recent_checkpoints: -1
+    validation_freq: 10000
+    validation_steps: 20
+    checkpoint_dir: .
+validation:
+  train: false
+wandb:
+  mode: disabled
+  results_dir: ./wandb
+  watch_model: false

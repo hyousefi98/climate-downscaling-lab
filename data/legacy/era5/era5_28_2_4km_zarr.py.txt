@@ -1,0 +1,191 @@
+# %%
+# %%
+"""
+ERA5 REGRIDDING: Native (~28km) -> 4km (Arizona Reference Grid)
+BATCH PROCESSOR (2000-2023) - FIXED PATHS & DIMS
+"""
+
+from pathlib import Path
+import shutil
+import numpy as np
+import xarray as xr
+import dask.array as da
+from numcodecs import Blosc
+
+# ================= CONFIGURATION =================
+YEARS = [str(y) for y in range(2000, 2013)]
+
+# FIXED PATHS (Updated based on your 'ls' output)
+SL_SOURCE_DIR = Path("/scr/hyousefi/era5/single_levels_2000_2023") 
+PL_SOURCE_DIR = Path("/scr/hyousefi/era5/pressure_levels_2000_2023")
+REF_GRID_PATH = Path("/home/hyousefi/data/AORC/aorc_reference_grids/aorc_refgrid_4km.nc")
+OUT_DIR = Path("/scr/hyousefi/corrdiff_datasets/era5_4km_zarr")
+
+# Output Chunking
+CHUNKS = {"time": 672, "y": 256, "x": 256}
+
+# ================= VARIABLE MAPPING =================
+SL_VARS = {
+    "10m_u_component_of_wind": ("U10", 1.0),
+    "10m_v_component_of_wind": ("V10", 1.0),
+    "2m_temperature":          ("T2", 1.0),
+    "surface_pressure":        ("PSFC", 0.01),          
+    "total_precipitation":     ("PREC_ACC_NC", 1000.0), 
+    "surface_solar_radiation_downwards": ("SWDOWN", 1/3600.0),    
+    "surface_thermal_radiation_downward_clear_sky": ("GLW", 1/3600.0),       
+}
+
+PL_LEVELS = ["500", "700", "850", "925"]
+PL_VARS = {
+    "temperature":             ("t", 1.0),
+    "u_component_of_wind":     ("u", 1.0),
+    "v_component_of_wind":     ("v", 1.0),
+    "specific_humidity":       ("q", 1.0),
+    "geopotential":            ("z", 1.0),
+    "fraction_of_cloud_cover": ("cc", 1.0),
+    "relative_humidity":       ("r", 1.0)
+}
+
+# ================= HELPERS =================
+def fix_dims(ds):
+    """
+    1. Renames valid_time -> time
+    2. Squeezes out singleton pressure_level dims
+    """
+    if "valid_time" in ds.dims:
+        ds = ds.rename({"valid_time": "time"})
+    
+    # Remove pressure_level if it exists as a dimension of size 1
+    if "pressure_level" in ds.dims:
+        ds = ds.squeeze("pressure_level", drop=True)
+        
+    return ds
+
+def fix_longitude(ds):
+    """Ensures Longitude is -180 to 180."""
+    if "longitude" in ds.coords:
+        if ds.longitude.max() > 180:
+            ds.coords["longitude"] = (ds.coords["longitude"] + 180) % 360 - 180
+            ds = ds.sortby("longitude")
+    return ds
+
+def get_target_grid():
+    ds_ref = xr.open_dataset(REF_GRID_PATH)
+    if "LAT2D" in ds_ref:
+        tgt_lat, tgt_lon = ds_ref["LAT2D"].values, ds_ref["LON2D"].values
+    elif "lat" in ds_ref and ds_ref["lat"].ndim == 2:
+        tgt_lat, tgt_lon = ds_ref["lat"].values, ds_ref["lon"].values
+    else:
+        tgt_lat, tgt_lon = np.meshgrid(ds_ref["lat"].values, ds_ref["lon"].values, indexing="ij")
+    return xr.DataArray(tgt_lat, dims=("y", "x")), xr.DataArray(tgt_lon, dims=("y", "x"))
+
+# ================= CORE PROCESSOR =================
+def process_year(year):
+    out_zarr = OUT_DIR / f"era5_4km_{year}.zarr"
+    if out_zarr.exists():
+        print(f"Skipping {year} (Output exists)")
+        return
+
+    print(f"\n=== Processing ERA5 Year {year} ===")
+    target_lat, target_lon = get_target_grid()
+    datasets_to_merge = []
+
+    # --- PROCESS SINGLE LEVELS ---
+    print("  Processing Single Levels...")
+    for var_folder, (target_name, scale) in SL_VARS.items():
+        src_path = SL_SOURCE_DIR / var_folder / f"era5_sl_{var_folder}_{year}.nc"
+        
+        if not src_path.exists():
+            print(f"    ! MISSING SL: {src_path}")
+            continue
+
+        ds = xr.open_dataset(src_path, chunks={"time": 24*14}) 
+        ds = fix_dims(ds)  # <--- Fix valid_time here
+        ds = fix_longitude(ds)
+        
+        vname = list(ds.data_vars)[0] # safely grab the var name
+        
+        print(f"    Regridding {vname} -> {target_name}...")
+        da_interp = ds[vname].interp(
+            latitude=target_lat, longitude=target_lon, 
+            method="linear", kwargs={"fill_value": None, "bounds_error": False}
+        )
+        if scale != 1.0: da_interp = da_interp * scale
+        da_interp.name = target_name
+        datasets_to_merge.append(da_interp)
+
+    # --- PROCESS PRESSURE LEVELS ---
+    print("  Processing Pressure Levels...")
+    for var_folder, (base_name, scale) in PL_VARS.items():
+        for level in PL_LEVELS:
+            target_name = f"{base_name}_{level}"
+            glob_pattern = f"era5_*_{level}hPa_{year}_*.nc"
+            search_path = PL_SOURCE_DIR / var_folder / level
+            files = sorted(list(search_path.glob(glob_pattern)))
+            
+            if not files:
+                print(f"    ! MISSING PL: {var_folder} {level}hPa")
+                continue
+                
+            print(f"    Regridding {target_name} ({len(files)} files)...")
+            ds = xr.open_mfdataset(files, combine="by_coords", chunks={"time": 24*14})
+            ds = fix_dims(ds) # <--- Fix valid_time & squeeze pressure_level here
+            ds = fix_longitude(ds)
+            
+            vname = list(ds.data_vars)[0]
+            da_interp = ds[vname].interp(
+                latitude=target_lat, longitude=target_lon, 
+                method="linear", kwargs={"fill_value": None, "bounds_error": False}
+            )
+            if scale != 1.0: da_interp = da_interp * scale
+            da_interp.name = target_name
+            datasets_to_merge.append(da_interp)
+
+    # --- MERGE & SANITIZE ---
+    if not datasets_to_merge:
+        print("  ! No data found.")
+        return
+
+    print("  Merging variables...")
+    ds_final = xr.merge(datasets_to_merge)
+
+    print("  Sanitizing metadata...")
+    ds_final = ds_final.assign_coords({
+        "lat": (("y", "x"), target_lat.values),
+        "lon": (("y", "x"), target_lon.values),
+    }).drop_vars(["latitude", "longitude", "pressure_level"], errors="ignore")
+
+    for v in ds_final.data_vars:
+        ds_final[v] = ds_final[v].astype(np.float32)
+        ds_final[v].attrs = {}
+        ds_final[v].encoding = {}
+    
+    for c in ds_final.coords: ds_final[c].encoding = {}
+
+    # --- SAVE ---
+    if out_zarr.exists(): shutil.rmtree(out_zarr)
+    
+    print(f"  Rechunking to {CHUNKS}...")
+    # Explicitly check for 'time' dimension before chunking
+    if "time" in ds_final.dims:
+        ds_final = ds_final.chunk(CHUNKS)
+    else:
+        print("    ! WARNING: 'time' dimension missing from final dataset. Chunking only y/x.")
+        ds_final = ds_final.chunk({"y": 256, "x": 256})
+
+    print(f"  Writing Zarr to: {out_zarr}")
+    compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.SHUFFLE)
+    encoding = {v: {"compressor": compressor, "_FillValue": np.nan, "dtype": "float32"} for v in ds_final.data_vars}
+    
+    ds_final.to_zarr(out_zarr, mode="w", encoding=encoding, consolidated=True)
+    print(f"✓ Year {year} Done!")
+
+if __name__ == "__main__":
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for yr in YEARS:
+        try:
+            process_year(yr)
+        except Exception as e:
+            print(f"!!! ERROR processing {yr}: {e}")
+            # raise e 
+# %%

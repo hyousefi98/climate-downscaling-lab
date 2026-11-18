@@ -1,0 +1,175 @@
+{
+  "kind": "source provenance only; no model/data/results artifacts",
+  "files": [
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/RF_3km.py",
+      "source_sha256": "83b6a8c1770af5578286d7238a04354d9b99751e2cd73f43f7932c92ef58eb55",
+      "ported_path": "baselines/historical/RF_3km.py",
+      "ported_sha256": "67ae6a6260aee4f47fb810286f2a9963ec6e1a04e5369362bb4391806893d78f",
+      "changes": "Portable paths; corrected physical_pair defaults and self-contained config support; explicit aorc_legacy route rejects physical stores/stats; new training persists feature schema and training climatology, eval-only restores it; period/feature checks; datetime64 and cftime support. Forest and feature arithmetic retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/generate_rf_nc.py",
+      "source_sha256": "bd7532acbfdf78920ad2cc1c75a5c3efc08b7d91012360ff877093da8d30223d",
+      "ported_path": "baselines/historical/generate_rf_nc.py",
+      "ported_sha256": "35333fb4a7cdbcd1b4cee40066e54012906f7e1c67b695aabfd80c71403bb952",
+      "changes": "Defaults use corrected physical-pair configs. Restores saved training feature/climatology state; old generation climatology refit requires explicit opt-in and is labelled. Feature count checked before prediction.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/generate_multivariate_baseline_nc.py",
+      "source_sha256": "9e39d0059236a9d8b7cefea0449604553437b5c42518a7587442f979ff6e669a",
+      "ported_path": "baselines/historical/generate_multivariate_baseline_nc.py",
+      "ported_sha256": "724dfcb8d725c02b38a56c092cdc06128b0e8f626956bf6c2f5e4b20d0a0b45c",
+      "changes": "Defaults use corrected physical-pair configs. Checks held-out time split and matching variable/grid/mask/normalization fingerprint before fitting. Historical multivariate ridge arithmetic retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/generate_linear_baseline_nc.py",
+      "source_sha256": "f4ed70dcf4e4b1b7384f3a76e613d61d4c12961200cf43a94ea48bbbb1968f5d",
+      "ported_path": "baselines/historical/generate_linear_baseline_nc.py",
+      "ported_sha256": "8135a77e4c7a13f60187bace49d1183a12d6d4af16bf9f11e0077e56ae16fd79",
+      "changes": "Portable paths and corrected physical config defaults; historical univariate fitting arithmetic retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/compute_forecast_scores.py",
+      "source_sha256": "0bb48c2da4bed3beff219bc1e5ac0336439d6a8887735602ff2bbbb013e8016e",
+      "ported_path": "baselines/historical/compute_forecast_scores.py",
+      "ported_sha256": "0bb48c2da4bed3beff219bc1e5ac0336439d6a8887735602ff2bbbb013e8016e",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/plot_single_validation_rf.py",
+      "source_sha256": "d5a2b03246e1e1713e932afff5f7b05d30628073b51ed7b18427379f07f78023",
+      "ported_path": "baselines/historical/plot_single_validation_rf.py",
+      "ported_sha256": "d5a2b03246e1e1713e932afff5f7b05d30628073b51ed7b18427379f07f78023",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/datasets/__init__.py",
+      "source_sha256": "e9108fa825e7c45ef1b3f2e8950f785652bbf44e6ddcd36a981b22fddec9c0e5",
+      "ported_path": "baselines/historical/datasets/__init__.py",
+      "ported_sha256": "e9108fa825e7c45ef1b3f2e8950f785652bbf44e6ddcd36a981b22fddec9c0e5",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/datasets/aorc_downscaling.py",
+      "source_sha256": "541e17253427a2e969b60e397a04e276c272ae1d28df1e626bce0d568bbb38f8",
+      "ported_path": "baselines/historical/datasets/aorc_downscaling.py",
+      "ported_sha256": "541e17253427a2e969b60e397a04e276c272ae1d28df1e626bce0d568bbb38f8",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/datasets/base.py",
+      "source_sha256": "d9806a89265d1c5361e6519a126c85de496b88095cdecc623ca4e3f469a3d687",
+      "ported_path": "baselines/historical/datasets/base.py",
+      "ported_sha256": "d9806a89265d1c5361e6519a126c85de496b88095cdecc623ca4e3f469a3d687",
+      "changes": "Only user-specific path defaults/comments are made relative; scientific algorithms retained.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/datasets/dataset.py",
+      "source_sha256": "d9727e884582c8919707414ab7aac2d9c8bb975476a7a5a35c68bf3512eec94c",
+      "ported_path": "baselines/historical/datasets/dataset.py",
+      "ported_sha256": "fb21bd87366216196e7f1919d76d615be359d2e8a8522b2799b9722df9bce669",
+      "changes": "Removed unrelated CWB/GEFS/HRRR imports. Registry selects shared physical_pair adapter or explicit aorc_legacy archive loader; default is physical_pair.",
+      "path_mappings": []
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/conf/config_training_aorc.yaml",
+      "source_sha256": "dd0fcd5fc75a22ce285001b4aa25be095ec226e7264c960455c9db7260c1051a",
+      "ported_path": "baselines/historical/conf/config_training_aorc.yaml",
+      "ported_sha256": "06eb5d4d96c912f10e6fee086112861ec86711e3f8dfddf6168d2dafb056b9d6",
+      "changes": "Portable relative paths and explicit aorc_legacy selector. Archived packed-number scaling settings retained; corrected defaults are separate configs/baselines/*_physical.yaml files.",
+      "path_mappings": [
+        {
+          "old_alias": "paperdata",
+          "portable_default": "data/processed"
+        },
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/conf/config_generate_aorc.yaml",
+      "source_sha256": "cd0f3e8ba0278aea9c7bd790710bc3083f6e42ce17745a04ccb4a2100854dd66",
+      "ported_path": "baselines/historical/conf/config_generate_aorc.yaml",
+      "ported_sha256": "6bebc780eaa6ceb51fddcda91a32e3316c013bec0cf43060d15b11147217b84f",
+      "changes": "Portable relative paths and explicit aorc_legacy selector. Archived packed-number scaling settings retained; corrected defaults are separate configs/baselines/*_physical.yaml files.",
+      "path_mappings": [
+        {
+          "old_alias": "paperdata",
+          "portable_default": "data/processed"
+        },
+        {
+          "old_alias": "aorc_reference_grids",
+          "portable_default": "data/grids"
+        }
+      ]
+    },
+    {
+      "source_snapshot": "2026-11-03",
+      "source": "rfmodel_3km/conf/base/dataset/aorc.yaml",
+      "source_sha256": "d6c29d5c18444aec570f24e07b957aa65e9998fa16001307301e6b5e7d904bee",
+      "ported_path": "baselines/historical/conf/base/dataset/aorc.yaml",
+      "ported_sha256": "a5a8e707a7641682b182d3a3b78a0bd5bc731b964c75eecc49a22ae7f0ece26a",
+      "changes": "Portable relative paths and explicit aorc_legacy selector. Archived packed-number scaling settings retained; corrected defaults are separate configs/baselines/*_physical.yaml files.",
+      "path_mappings": []
+    }
+  ],
+  "omitted_unrelated_sources": [
+    {
+      "source": "rfmodel_3km/datasets/norm.py",
+      "source_sha256": "4b5b95e14fec9e9185563e456f4ab1b7286b1778173c28a247211781bac98249",
+      "reason": "Unrelated CWB/HRRR/GEFS loader or helper unused by the retained AORC baseline registry."
+    },
+    {
+      "source": "rfmodel_3km/datasets/img_utils.py",
+      "source_sha256": "bad9b853b6c8b0e051e985e992eb1174f3c80851720c77c3036a778443c70bb1",
+      "reason": "Unrelated CWB/HRRR/GEFS loader or helper unused by the retained AORC baseline registry."
+    },
+    {
+      "source": "rfmodel_3km/datasets/cwb.py",
+      "source_sha256": "d342960ab82eea1f65d347e5c8bcb6d7d8a0819892d4dff31ffd7f082925b305",
+      "reason": "Unrelated CWB/HRRR/GEFS loader or helper unused by the retained AORC baseline registry."
+    },
+    {
+      "source": "rfmodel_3km/datasets/hrrrmini.py",
+      "source_sha256": "85bd41a86d9bf50ee0a5ad72901e56fb3eb7b618925fad82fd53ea8b697767c6",
+      "reason": "Unrelated CWB/HRRR/GEFS loader or helper unused by the retained AORC baseline registry."
+    },
+    {
+      "source": "rfmodel_3km/datasets/gefs_hrrr.py",
+      "source_sha256": "ec347459a0e4c373fe2152b9946f54c0e67efe7ce8be76ea3ccb386fd1891cc8",
+      "reason": "Unrelated CWB/HRRR/GEFS loader or helper unused by the retained AORC baseline registry."
+    },
+    {
+      "source": "rfmodel_3km/datasets/masked_loss.py",
+      "source_sha256": "24d9528b24aef4ffe908883dd735e040b453dca00a0ba76862da15c1ff25ece1",
+      "reason": "Unrelated CWB/HRRR/GEFS loader or helper unused by the retained AORC baseline registry."
+    }
+  ],
+  "new_code": {
+    "baselines/historical/rf_feature_state.py": "Training-only feature-state persistence and strict compatibility checks; no fitted state is bundled."
+  }
+}

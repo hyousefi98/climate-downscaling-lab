@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "downscaling-gap"
+version = "0.1.0"
+description = "Code for synthetic and dynamical climate-downscaling benchmarks"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{name = "Hossein Yousefi Sohi"}]
+dependencies = [
+  "numpy>=2.0,<3",
+  "scipy>=1.15,<2",
+  "xarray>=2025.6,<2026",
+  "zarr>=2.18,<3",
+  "numcodecs>=0.13,<0.16",
+  "netCDF4>=1.7,<2",
+  "dask[array]>=2025.3,<2026",
+  "pandas>=2.2,<3",
+  "PyYAML>=6,<7",
+  "requests>=2.32,<3",
+  "fsspec>=2025.3,<2026",
+  "s3fs>=2025.3,<2026",
+  "pyproj>=3.6,<4",
+]
+
+[project.optional-dependencies]
+train = [
+  "torch==2.8.0", "hydra-core==1.3.2", "omegaconf==2.3.0",
+  "wandb>=0.22,<0.23", "nvtx>=0.2.13,<0.3", "cftime>=1.6,<2",
+  "tqdm>=4.66", "einops>=0.8,<0.9", "xskillscore>=0.0.27,<0.1",
+  "numba>=0.61,<0.63", "opencv-python-headless>=4.11,<5", "psutil>=5.9,<8",
+]
+baselines = ["scikit-learn>=1.7,<1.8", "joblib>=1.5,<2"]
+plots = ["matplotlib>=3.10,<3.11", "cartopy>=0.24,<0.26", "xskillscore>=0.0.27,<0.1"]
+download = ["cdsapi>=0.7,<0.8", "h5netcdf>=1.6,<2", "planetary-computer>=1.0,<2", "pystac-client>=0.8,<1", "adlfs>=2025.8,<2027"]
+regrid = ["xesmf>=0.8,<0.10"]
+preprocess = ["cartopy>=0.24,<0.26", "shapely>=2,<3"]
+test = ["pytest>=8,<10", "scikit-learn>=1.7,<1.8", "joblib>=1.5,<2", "matplotlib>=3.10,<3.11", "hydra-core==1.3.2", "omegaconf==2.3.0"]
+
+[project.urls]
+Repository = "https://github.com/hyousefi98/downscaling-gap"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["data*", "models*", "workflows*", "baselines*", "evaluation*", "figures*", "configs*", "legacy*", "scripts*", "patches*"]
+exclude = ["tests*", "outputs*", "results*", "runs*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml", "*.yml", "*.txt", "*.md"]
+"patches" = ["*.patch", "*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "models/tests"]
+addopts = "-ra"
+markers = [
+  "integration: optional tests requiring PhysicsNeMo or external data",
+  "gpu: optional tests requiring an available CUDA GPU",
+]

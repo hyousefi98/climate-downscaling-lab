@@ -1,0 +1,102 @@
+# %%
+"""
+ERA5 MERGER: Combine Yearly Zarrs -> Single Multi-Year Zarr (2000-2012)
+"""
+
+import xarray as xr
+import numpy as np
+from pathlib import Path
+import shutil
+from numcodecs import Blosc
+
+# ================= CONFIGURATION =================
+# Input Directory (Where your yearly files are)
+INPUT_DIR = Path("/scr/hyousefi/corrdiff_datasets/era5_4km_zarr")
+
+# Output File (Final Destination)
+OUT_ZARR = Path("/scr/hyousefi/corrdiff_datasets/paperdata/era5_4km_2000_2012.zarr")
+
+# Years to merge
+YEARS = list(range(2000, 2013))  # 2000 to 2012 inclusive
+
+# Chunking Strategy (Optimized for CorrDiff Training)
+# We want large time chunks for sequential reading
+CHUNKS = {"time": 672, "y": 256, "x": 256}
+
+def main():
+    # 1. Gather Input Paths
+    print(f"Looking for files in: {INPUT_DIR}")
+    files_to_merge = []
+    
+    for year in YEARS:
+        zarr_path = INPUT_DIR / f"era5_4km_{year}.zarr"
+        if zarr_path.exists():
+            files_to_merge.append(zarr_path)
+            print(f"  [Found] {zarr_path.name}")
+        else:
+            print(f"  [MISSING] {zarr_path.name} - ⚠️ Cannot proceed without full record!")
+            return
+
+    if not files_to_merge:
+        print("No files found.")
+        return
+
+    # 2. Lazy Load & Concatenate
+    print("\nLazy loading and concatenating...")
+    
+    # We open them individually and concat to ensure strict ordering
+    datasets = [xr.open_zarr(f, consolidated=True) for f in files_to_merge]
+    
+    # Concatenate along time
+    ds_combined = xr.concat(datasets, dim="time")
+    
+    # Sort by time just in case, though concat usually preserves order
+    ds_combined = ds_combined.sortby("time")
+
+    # 3. Validation
+    print("\n--- Combined Dataset Summary ---")
+    print(f"Time Steps: {ds_combined.sizes['time']}")
+    print(f"Time Range: {ds_combined.time.values[0]} to {ds_combined.time.values[-1]}")
+    print(f"Variables: {list(ds_combined.data_vars)}")
+
+    # 4. Rechunking
+    print(f"\nRechunking to {CHUNKS}...")
+    ds_combined = ds_combined.chunk(CHUNKS)
+
+    # 5. Define Encoding
+    # We must reset encoding to prevent conflicts from the input Zarrs
+    compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.SHUFFLE)
+    encoding = {}
+    
+    for var_name in ds_combined.data_vars:
+        encoding[var_name] = {
+            "compressor": compressor,
+            "dtype": "float32",
+            "_FillValue": np.nan
+        }
+        # Clear existing encoding from input
+        ds_combined[var_name].encoding = {}
+
+    # Clear coord encoding
+    for coord in ds_combined.coords:
+        ds_combined[coord].encoding = {}
+
+    # 6. Write to Disk
+    if OUT_ZARR.exists():
+        print(f"\n⚠️ Removing existing output: {OUT_ZARR}")
+        shutil.rmtree(OUT_ZARR)
+        
+    # Ensure parent directory exists
+    OUT_ZARR.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"Writing merged Zarr to: {OUT_ZARR}")
+    print("This may take a while depending on disk speed...")
+    
+    ds_combined.to_zarr(OUT_ZARR, mode="w", encoding=encoding, consolidated=True)
+    
+    print("\n✅ Merge Complete!")
+
+if __name__ == "__main__":
+    main()
+# %%
+# %%

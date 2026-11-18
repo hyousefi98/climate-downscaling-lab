@@ -1,0 +1,214 @@
+# Architecture hyperparameters only; no learned arrays or model statistics.
+- experiment: aorc
+  stage: regression
+  checkpoint_basename: UNet.0.200000.mdlus
+  architecture_args:
+    __name__: UNet
+    __module__: physicsnemo.models.diffusion.unet
+    __args__:
+      img_resolution:
+      - 288
+      - 480
+      img_in_channels: 12
+      img_out_channels: 8
+      use_fp16: false
+      model_type: SongUNetPosEmbd
+      checkpoint_level: 6
+      N_grid_channels: 4
+      embedding_type: zero
+      model_channels: 128
+      channel_mult:
+      - 1
+      - 2
+      - 2
+      - 2
+      - 2
+      attn_resolutions:
+      - 28
+      use_apex_gn: false
+      amp_mode: true
+  framework_metadata:
+    physicsnemo_version: 1.2.0a0
+    mdlus_file_version: 0.2.0
+  args_sha256: c68fb87dd5946b502ca805ec3ead3f49f0cdbba90a9ed87c54f9bb3a836b3d18
+  lineage_note: Architecture metadata read from the current externally stored checkpoint;
+    no tensor contents copied.
+- experiment: aorc
+  stage: diffusion
+  checkpoint_basename: EDMPrecondSuperResolution.0.400000.mdlus
+  architecture_args:
+    __name__: EDMPrecondSuperResolution
+    __module__: physicsnemo.models.diffusion.preconditioning
+    __args__:
+      img_resolution:
+      - 288
+      - 480
+      img_in_channels: 20
+      img_out_channels: 8
+      use_fp16: false
+      model_type: SongUNetPosEmbd
+      sigma_data: 1.0
+      sigma_min: 0.0
+      sigma_max: .inf
+      checkpoint_level: 2
+      gridtype: sinusoidal
+      N_grid_channels: 4
+      embedding_type: zero
+      model_channels: 128
+      channel_mult:
+      - 1
+      - 2
+      - 2
+      - 2
+      - 2
+      attn_resolutions:
+      - 28
+      amp_mode: true
+  framework_metadata:
+    physicsnemo_version: 1.2.0a0
+    mdlus_file_version: 0.1.0
+  args_sha256: a84a844b3e5c28b17a122832bc1e45a5dca97de545da537e06b8a702d5149e37
+  lineage_note: Architecture metadata read from the current externally stored checkpoint;
+    no tensor contents copied.
+- experiment: wrf
+  stage: regression
+  checkpoint_basename: UNet.0.155008.mdlus
+  architecture_args:
+    __name__: UNet
+    __module__: physicsnemo.models.diffusion.unet
+    __args__:
+      img_resolution:
+      - 288
+      - 480
+      img_in_channels: 12
+      img_out_channels: 8
+      use_fp16: false
+      model_type: SongUNetPosEmbd
+      checkpoint_level: 6
+      N_grid_channels: 4
+      embedding_type: zero
+      model_channels: 128
+      channel_mult:
+      - 1
+      - 2
+      - 2
+      - 2
+      - 2
+      attn_resolutions:
+      - 28
+      use_apex_gn: false
+      amp_mode: true
+  framework_metadata:
+    physicsnemo_version: 1.2.0a0
+    mdlus_file_version: 0.2.0
+  args_sha256: c68fb87dd5946b502ca805ec3ead3f49f0cdbba90a9ed87c54f9bb3a836b3d18
+  lineage_note: Architecture metadata read from the current externally stored checkpoint;
+    no tensor contents copied.
+- experiment: wrf
+  stage: diffusion
+  checkpoint_basename: EDMPrecondSuperResolution.0.800000.mdlus
+  architecture_args:
+    __name__: EDMPrecondSuperResolution
+    __module__: physicsnemo.models.diffusion.preconditioning
+    __args__:
+      img_resolution:
+      - 288
+      - 480
+      img_in_channels: 20
+      img_out_channels: 8
+      use_fp16: false
+      model_type: SongUNetPosEmbd
+      sigma_data: 0.5
+      sigma_min: 0.0
+      sigma_max: .inf
+      checkpoint_level: 0
+      gridtype: sinusoidal
+      N_grid_channels: 4
+      embedding_type: zero
+      model_channels: 128
+      channel_mult:
+      - 1
+      - 2
+      - 2
+      - 2
+      - 2
+      attn_resolutions:
+      - 28
+      amp_mode: true
+  framework_metadata:
+    physicsnemo_version: 1.2.0a0
+    mdlus_file_version: 0.1.0
+  args_sha256: de772beb7ed14b10afc83ca2d49aec21c78dd90505ef77d62da9f7aaea5abd38
+  lineage_note: Current v4 candidate; original saved paper-output configuration referenced
+    deleted v6 directory. Byte identity to that original diffusion checkpoint is unverified.
+- experiment: era5_conus404
+  stage: regression
+  checkpoint_basename: UNet.0.150016.mdlus
+  architecture_args:
+    __name__: UNet
+    __module__: physicsnemo.models.diffusion.unet
+    __args__:
+      img_resolution:
+      - 224
+      - 352
+      img_in_channels: 39
+      img_out_channels: 8
+      use_fp16: false
+      model_type: SongUNetPosEmbd
+      checkpoint_level: 6
+      N_grid_channels: 4
+      embedding_type: zero
+      model_channels: 128
+      channel_mult:
+      - 1
+      - 2
+      - 2
+      - 2
+      - 2
+      attn_resolutions:
+      - 28
+      use_apex_gn: false
+      amp_mode: true
+  framework_metadata:
+    physicsnemo_version: 1.2.0a0
+    mdlus_file_version: 0.2.0
+  args_sha256: 9aaaf0aa24e3de7aa788f41d5cf27de392f12b1026a2cfece4f9f9978cfc3214
+  lineage_note: Architecture metadata read from the current externally stored checkpoint;
+    no tensor contents copied.
+- experiment: era5_conus404
+  stage: diffusion
+  checkpoint_basename: EDMPrecondSuperResolution.0.670016.mdlus
+  architecture_args:
+    __name__: EDMPrecondSuperResolution
+    __module__: physicsnemo.models.diffusion.preconditioning
+    __args__:
+      img_resolution:
+      - 224
+      - 352
+      img_in_channels: 47
+      img_out_channels: 8
+      use_fp16: false
+      model_type: SongUNetPosEmbd
+      sigma_data: 0.5
+      sigma_min: 0.0
+      sigma_max: .inf
+      checkpoint_level: 0
+      gridtype: sinusoidal
+      N_grid_channels: 4
+      embedding_type: zero
+      model_channels: 128
+      channel_mult:
+      - 1
+      - 2
+      - 2
+      - 2
+      - 2
+      attn_resolutions:
+      - 28
+      amp_mode: true
+  framework_metadata:
+    physicsnemo_version: 1.2.0a0
+    mdlus_file_version: 0.1.0
+  args_sha256: e0cfe9592033979118548e7b544ad326da746d50aa4d10eb1fe86ef56f79f6c9
+  lineage_note: Architecture metadata read from the current externally stored checkpoint;
+    no tensor contents copied.

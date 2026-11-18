@@ -1,0 +1,31 @@
+# Corrected physical-unit baseline workflow. Edit paths to prepared stores and
+# training-only statistics. Both ridge and RF use the same pair and split.
+dataset:
+  type: physical_pair
+  input_data_path: data_local/aorc_input_physical.zarr
+  target_data_path: data_local/aorc_target_physical.zarr
+  stats_path: data_local/aorc_physical_stats.json
+  input_variables: &id001
+  - APCP_surface
+  - DLWRF_surface
+  - DSWRF_surface
+  - PRES_surface
+  - SPFH_2maboveground
+  - TMP_2maboveground
+  - UGRD_10maboveground
+  - VGRD_10maboveground
+  output_variables: *id001
+  train: true
+  train_years:
+  - 2000
+  - 2011
+  valid_years:
+  - 2012
+  - 2012
+  landmask_path: data_local/aorc_land_mask_3km.nc
+  coastal_buffer_pixels: 5
+  crop_to_multiple: 32
+  precip_threshold: 0.1
+  keep_ocean_as_nan: true
+validation:
+  train: false

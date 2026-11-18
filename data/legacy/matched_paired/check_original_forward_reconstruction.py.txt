@@ -1,0 +1,94 @@
+"""Independent three-case hourly-source check against original stored baseline."""
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
+import json
+import sys
+from pathlib import Path
+import numpy as np
+import netCDF4
+import zarr
+from numcodecs import blosc
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
+sys.path.insert(0, str(ROOT))
+from datasets.aorc_downscaling import AORCDownscalingDataset, DataFilters
+from build_aligned_inputs import CHANNELS, SOURCES, DATA, small_array, write_json
+
+blosc.set_nthreads(4)
+dates = json.loads((HERE.parent/'r2_comment3_matched_inference/experiment_I_timestamps_200.json').read_text())
+stats = json.loads((DATA/'aorc_stats_3km.json').read_text())
+adapter = AORCDownscalingDataset.__new__(AORCDownscalingDataset)
+adapter.stats = stats
+adapter.input_variables = CHANNELS
+adapter.output_variables = CHANNELS
+adapter.precip_threshold = 0.1
+adapter.clip_negative = True
+
+
+def original_model_roundtrip(raw, group):
+    a = np.nan_to_num(raw.astype(np.float32), nan=0.0)
+    a = DataFilters.apply_scale_factors(a, CHANNELS)
+    a = DataFilters.clip_negative_values(a, CHANNELS)
+    a = DataFilters.apply_precip_threshold(a, CHANNELS, 0.1)
+    normalized = adapter._normalize(a, CHANNELS, group)
+    return adapter.denormalize_input(normalized) if group == 'input' else adapter.denormalize_output(normalized)
+
+
+def differences(a, b, mask):
+    d = a[:, mask].astype(np.float64)-b[:, mask].astype(np.float64)
+    return {name:dict(max_absolute_difference=float(np.max(np.abs(d[i]))),
+                     mean_absolute_difference=float(np.mean(np.abs(d[i]))),
+                     rmse=float(np.sqrt(np.mean(d[i]**2)))) for i,name in enumerate(CHANNELS)}
+
+
+report = dict(cases=[0,100,199], scope='Independent hourly forward aggregation reproduces original six-hour store and saved baseline input/truth. Corrected backward-vs-forward differences are diagnostic, not model skill.',
+              numerical_note='Original writer uses float32 nansum/nanmean; corrected builder uses float64 accumulation then float32 storage.', groups={})
+with netCDF4.Dataset(ROOT/'all_aorc_12km_to_3km.nc') as baseline, netCDF4.Dataset(HERE/'aligned_inputs.nc') as corrected:
+    baseline.set_auto_mask(False)
+    corrected.set_auto_mask(False)
+    mask = corrected['verification_mask'][:].astype(bool)
+    for group,path in SOURCES.items():
+        source = zarr.open(str(path),mode='r')
+        oldpath = DATA/('aorc_12km_2_3km_2000_2012_6h.zarr' if group=='synthetic_input' else 'aorc_3km_2000_2012_6h.zarr')
+        oldstore = zarr.open(str(oldpath),mode='r')
+        ta = dict(oldstore['time'].attrs)
+        if ta['units'].startswith('nanoseconds since '):
+            olddates=(np.datetime64(ta['units'].split(' since ')[1],'ns')+oldstore['time'][:].astype('timedelta64[ns]')).astype('datetime64[h]')
+        else:
+            olddates = np.asarray(netCDF4.num2date(oldstore['time'][:],ta['units'],only_use_cftime_datetimes=False),dtype='datetime64[h]')
+        stats_group='input' if group=='synthetic_input' else 'output'
+        ncgroup='input' if group=='synthetic_input' else 'truth'
+        rows=[]
+        for case in (0,100,199):
+            stamp=np.datetime64(dates[case],'h')
+            begin=int((stamp-np.datetime64('2012-01-01T00','h'))/np.timedelta64(1,'h'))
+            hourly=np.asarray(source['aorc'][begin:begin+6,:,:288,:480])
+            hourly=np.where(hourly>-32000,hourly,np.nan)
+            forward=np.empty((8,288,480),np.float32)
+            forward[0]=np.nansum(hourly[:,0],axis=0)
+            forward[1:]=np.nanmean(hourly[:,1:],axis=0)
+            oldidx=int(np.searchsorted(olddates,stamp))
+            assert olddates[oldidx]==stamp
+            oldraw=np.asarray(oldstore['aorc'][oldidx,:,:288,:480])
+            saved=np.stack([baseline[ncgroup][name.replace('_','')][case] for name in CHANNELS])
+            newraw=np.stack([corrected[group][name][case] for name in CHANNELS])
+            reconstructed=original_model_roundtrip(forward,stats_group)
+            oldroundtrip=original_model_roundtrip(oldraw,stats_group)
+            newroundtrip=original_model_roundtrip(newraw,stats_group)
+            # The original 6-hour source must reproduce exactly through its own loader.
+            np.testing.assert_array_equal(oldroundtrip[:,mask],saved[:,mask])
+            # Permit only float32 reduction rounding in source aggregation reconstruction.
+            np.testing.assert_allclose(reconstructed[:,mask],saved[:,mask],rtol=3e-6,atol=1e-4)
+            rows.append(dict(case=case,time=dates[case],forward_hourly_indices=list(range(begin,begin+6)),
+                raw_forward_vs_original_six_hour_store=differences(forward,oldraw,mask),
+                reconstructed_forward_vs_saved_baseline=differences(reconstructed,saved,mask),
+                original_store_roundtrip_exact_saved_baseline=True,
+                corrected_backward_vs_original_forward_model_units=differences(newroundtrip,saved,mask),
+                original_forward_precip_max_mm=float(saved[0][mask].max()),
+                corrected_backward_precip_max_mm=float(newroundtrip[0][mask].max())))
+            print(group,case,'source -> baseline passed',flush=True)
+        report['groups'][group]=dict(hourly_source=str(path),original_six_hour_store=str(oldpath),rows=rows)
+report['complete']=True
+write_json(HERE/'original_forward_reconstruction_checks.json',report)
+print('Original-source reconstruction checks passed',flush=True)

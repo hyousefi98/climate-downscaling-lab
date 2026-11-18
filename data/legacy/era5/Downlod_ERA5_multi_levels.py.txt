@@ -1,0 +1,68 @@
+# %%
+import cdsapi, calendar, pathlib, time
+
+OUTROOT = pathlib.Path("/scr/hyousefi/era5/pressure_levels_2000_2024").expanduser()
+OUTROOT.mkdir(parents=True, exist_ok=True)
+
+VARIABLES = {
+    "geopotential"           : "z",
+    "specific_humidity"      : "q",
+    "temperature"            : "t",
+    "u_component_of_wind"    : "u",
+    "v_component_of_wind"    : "v",
+    "relative_humidity"      : "rh",
+    "fraction_of_cloud_cover"    : "fc",
+}
+LEVELS   = ["500", "700", "850", "925"]           # hPa
+YEARS    = [str(y) for y in range(2000, 2024)]    # 2020-2024
+# YEARS    = [ "2018", "2019" , "2020", "2021", "2022"]
+
+MONTHS   = [f"{m:02d}" for m in range(1, 13)]     # 01-12
+
+AREA_BOX = [40.5, -118, 28, -105]                 # N, W, S, E  (lat/lon)
+# AREA_BOX = [34.18, -87.34, 31.76, -82.61]
+TIME_STR = [f"{h:02d}:00" for h in range(24)]     # all hours
+DAYS_31  = [f"{d:02d}" for d in range(1, 32)]     # 01-31 (CDS trims extra)
+
+c = cdsapi.Client()
+
+for var_name, short in VARIABLES.items():
+    for level in LEVELS:
+        for year in YEARS:
+            for month in MONTHS:
+                days_this_month = DAYS_31[:calendar.monthrange(int(year), int(month))[1]]
+
+                outdir  = OUTROOT / var_name / level
+                outdir.mkdir(parents=True, exist_ok=True)
+
+                outfile = outdir / f"era5_{short}_{level}hPa_{year}_{month}.nc"
+                if outfile.exists():
+                    print(f"[skip] {outfile} already present")
+                    continue
+
+                print(f"[download] {outfile.name}")
+                req = {
+                    "product_type"   : "reanalysis",
+                    "variable"       : var_name,
+                    "pressure_level" : level,
+                    "year"           : year,
+                    "month"          : month,
+                    "day"            : days_this_month,
+                    "time"           : TIME_STR,
+                    "format"         : "netcdf",
+                    "area"           : AREA_BOX,
+                }
+
+                # CDS occasionally throttles; a tiny sleep is friendly
+                try:
+                    c.retrieve("reanalysis-era5-pressure-levels", req, str(outfile))
+                except Exception as e:
+                    print(f"  ⚠️  failed: {e}")
+                    # optional: wait & retry once
+                    #time.sleep(30)
+                    try:
+                        c.retrieve("reanalysis-era5-pressure-levels", req, str(outfile))
+                    except Exception as e2:
+                        print(f"  ❌ second failure, giving up on this file")
+
+print("✅ all available chunks requested")

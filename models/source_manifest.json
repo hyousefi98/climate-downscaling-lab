@@ -1,0 +1,273 @@
+[
+  {
+    "source": "corrdiff_3km_v3/helpers/train_helpers.py",
+    "destination": "models/helpers/train_helpers.py",
+    "source_sha256": "99f0b62a7c63f62e9e13d1a603df92a3e1ddd4a62b0e11fa6750cba5e50abd7e",
+    "ported_sha256": "99f0b62a7c63f62e9e13d1a603df92a3e1ddd4a62b0e11fa6750cba5e50abd7e",
+    "changes": []
+  },
+  {
+    "source": "corrdiff_3km_v3/helpers/ema.py",
+    "destination": "models/helpers/ema.py",
+    "source_sha256": "f44f07bff17dff49a76af8d50ec3d89c5a25f503b5aaef9f22526cf4b65da0f5",
+    "ported_sha256": "f44f07bff17dff49a76af8d50ec3d89c5a25f503b5aaef9f22526cf4b65da0f5",
+    "changes": []
+  },
+  {
+    "source": "corrdiff_3km_v3/helpers/generate_helpers.py",
+    "destination": "models/helpers/generate_aorc.py",
+    "source_sha256": "362b42cd7e8f266c0eac10f70a4e38dffb05d3b769154ffd69dabcba8c895e6d",
+    "ported_sha256": "4c0f444ca820ce8b4b29fcf09ce732b924aee12fc45c7fd0c85f6cb96aec0505",
+    "changes": [
+      "from datasets.dataset -> from models.datasets.factory",
+      "from datasets.base -> from models.datasets.base"
+    ]
+  },
+  {
+    "source": "corrdiff_wrf_3km_v4/helpers/generate_helpers.py",
+    "destination": "models/helpers/generate_paired.py",
+    "source_sha256": "c04daa60117d836a2bb132782befe0f889ba4879d68b6bfe19514b1435403400",
+    "ported_sha256": "f3383e6c769b61a4deff9db42af031112f2b884e291b37290f441902e1bc6cb3",
+    "changes": [
+      "from datasets.dataset -> from models.datasets.factory",
+      "from datasets.base -> from models.datasets.base"
+    ]
+  },
+  {
+    "source": "corrdiff_3km_v3/datasets/base.py",
+    "destination": "models/datasets/base.py",
+    "source_sha256": "d9806a89265d1c5361e6519a126c85de496b88095cdecc623ca4e3f469a3d687",
+    "ported_sha256": "d9806a89265d1c5361e6519a126c85de496b88095cdecc623ca4e3f469a3d687",
+    "changes": []
+  },
+  {
+    "source": "corrdiff_3km_v3/datasets/aorc_downscaling.py",
+    "destination": "models/datasets/aorc_legacy.py",
+    "source_sha256": "47d747b04bbd43bba3b4e4540d0c80d324c25af4b871b932714dfeffbfa37d80",
+    "ported_sha256": "55847880ad82362ba0b62f1d765e31efc0a73bbdd4ed218360ee32695bdd1a03",
+    "changes": [
+      "from datasets.base -> from models.datasets.base",
+      "Strict pre-sanitization quality checks by default; archive_replay explicit opt-in; cache and lock writes isolated from source data.",
+      "Strict quality check before historical NaN sanitization; explicit archive_replay bypass.",
+      "Runtime validity-index caches redirected outside packaged code, with existing cache copied read-only."
+    ]
+  },
+  {
+    "source": "corrdiff_wrf_3km_v4/datasets/wrf_downscaling.py",
+    "destination": "models/datasets/wrf_legacy.py",
+    "source_sha256": "6c487de4c91bbb077d7e1913213b0bf9d718db8cf17505a8dde016511e833268",
+    "ported_sha256": "8738b5f1bc190b510365ac7df97fdc9f0916e7713560b16caa59cdfb64b9e67f",
+    "changes": [
+      "from datasets.base -> from models.datasets.base",
+      "Strict pre-sanitization quality checks by default; archive_replay explicit opt-in; cache and lock writes isolated from source data.",
+      "Strict quality check before historical NaN sanitization; explicit archive_replay bypass.",
+      "Runtime validity-index caches redirected outside packaged code, with existing cache copied read-only."
+    ]
+  },
+  {
+    "source": "corrdiff_conus404_era5_4km_v1/datasets/era5_conus404_downscaling.py",
+    "destination": "models/datasets/era5_conus404_legacy.py",
+    "source_sha256": "b23882b7c1d9e4b4fc13ce5e361eafb2d5fb9caf9bfae247d7f3ca560122d2f5",
+    "ported_sha256": "c2ecbd35f3613552f9e873eaafd618c3f33719ab2dea5081a8ea73aa219a4433",
+    "changes": [
+      "from datasets.base -> from models.datasets.base",
+      "Strict pre-sanitization quality checks by default; archive_replay explicit opt-in; cache and lock writes isolated from source data.",
+      "Strict quality check before historical NaN sanitization; explicit archive_replay bypass.",
+      "Runtime validity-index caches redirected outside packaged code, with existing cache copied read-only."
+    ]
+  },
+  {
+    "source": "corrdiff_3km_v3/datasets/masked_loss.py",
+    "destination": "models/losses_aorc.py",
+    "source_sha256": "345d6b690519ee9864b64d94e16eba2e33680841a69fa1ab568733e5f2b8c3d8",
+    "ported_sha256": "345d6b690519ee9864b64d94e16eba2e33680841a69fa1ab568733e5f2b8c3d8",
+    "changes": []
+  },
+  {
+    "source": "corrdiff_wrf_3km_v4/datasets/masked_loss.py",
+    "destination": "models/losses_paired.py",
+    "source_sha256": "3f7e6222e5cd19de9833957430f3adc14685d0a54d5b159aca869834f9ab20af",
+    "ported_sha256": "3f7e6222e5cd19de9833957430f3adc14685d0a54d5b159aca869834f9ab20af",
+    "changes": []
+  },
+  {
+    "source": "corrdiff_3km_v3/train.py",
+    "destination": "legacy/aorc/train.py",
+    "source_sha256": "aa4f06ef8929755887da6fafb5b39645b7a95f60a2fa648f3400e34ca94c63c4",
+    "ported_sha256": "ac584b8f04ef501351225b552480fa0aafa957f74884ea746913817c82378013",
+    "changes": [
+      "from datasets.masked_loss -> from models.losses_aorc",
+      "from datasets.dataset -> from models.datasets.factory",
+      "from helpers.train_helpers -> from models.helpers.train_helpers",
+      "from helpers.ema -> from models.helpers.ema",
+      "from helpers.generate_helpers -> from models.helpers.generate_aorc"
+    ]
+  },
+  {
+    "source": "corrdiff_3km_v3/generate.py",
+    "destination": "legacy/aorc/generate.py",
+    "source_sha256": "25e01f8183532c856589b22172cf7819407741a7c9d3716aea78f18d4b7d3744",
+    "ported_sha256": "71bf879b6f5f04808f227a1bf3b089cc362731c794a739022163de57276a5f4f",
+    "changes": [
+      "from datasets.masked_loss -> from models.losses_aorc",
+      "from datasets.dataset -> from models.datasets.factory",
+      "from helpers.train_helpers -> from models.helpers.train_helpers",
+      "from helpers.ema -> from models.helpers.ema",
+      "from helpers.generate_helpers -> from models.helpers.generate_aorc"
+    ]
+  },
+  {
+    "source": "corrdiff_wrf_3km_v4/train.py",
+    "destination": "legacy/wrf/train.py",
+    "source_sha256": "e27891e763cdea42e005c9bc25fbfdbdfeff6f2a80af779b97f6695364e1ceea",
+    "ported_sha256": "942a27594be758a6b878ceb72a6495db7342fdadb5cac327e3fded25728df2e3",
+    "changes": [
+      "from datasets.masked_loss -> from models.losses_paired",
+      "from datasets.dataset -> from models.datasets.factory",
+      "from helpers.train_helpers -> from models.helpers.train_helpers",
+      "from helpers.ema -> from models.helpers.ema",
+      "from helpers.generate_helpers -> from models.helpers.generate_paired"
+    ]
+  },
+  {
+    "source": "corrdiff_wrf_3km_v4/generate.py",
+    "destination": "legacy/wrf/generate.py",
+    "source_sha256": "e13885a1578554f84df997a79cd3c745b9e1a9aab7a2eb8b09281488b9e81af3",
+    "ported_sha256": "2564df4fcefd17f7d0a9cb99419da39da721b92e190e7a03c8643cb0026895eb",
+    "changes": [
+      "from datasets.masked_loss -> from models.losses_paired",
+      "from datasets.dataset -> from models.datasets.factory",
+      "from helpers.train_helpers -> from models.helpers.train_helpers",
+      "from helpers.ema -> from models.helpers.ema",
+      "from helpers.generate_helpers -> from models.helpers.generate_paired"
+    ]
+  },
+  {
+    "source": "corrdiff_conus404_era5_4km_v1/train.py",
+    "destination": "legacy/era5_conus404/train.py",
+    "source_sha256": "e6d5eaa8f0429e1b174ffa1767f86a8c3cd5158dac50eeacd5f8dd4030040789",
+    "ported_sha256": "6c98111a2133bc06fc1b0e2a5e8a6d54041bcc7aab5fd7495334e459e3858d04",
+    "changes": [
+      "from datasets.masked_loss -> from models.losses_paired",
+      "from datasets.dataset -> from models.datasets.factory",
+      "from helpers.train_helpers -> from models.helpers.train_helpers",
+      "from helpers.ema -> from models.helpers.ema",
+      "from helpers.generate_helpers -> from models.helpers.generate_paired"
+    ]
+  },
+  {
+    "source": "corrdiff_conus404_era5_4km_v1/generate.py",
+    "destination": "legacy/era5_conus404/generate.py",
+    "source_sha256": "f9b5a198cba91615a13aaccaaf56d72e870f487589c21f49b3b63c2260779c17",
+    "ported_sha256": "7f43183dc71f2326d3a7aff5b01b9458a42ccfd0fbb1fa1d39f6022101761f12",
+    "changes": [
+      "from datasets.masked_loss -> from models.losses_paired",
+      "from datasets.dataset -> from models.datasets.factory",
+      "from helpers.train_helpers -> from models.helpers.train_helpers",
+      "from helpers.ema -> from models.helpers.ema",
+      "from helpers.generate_helpers -> from models.helpers.generate_paired"
+    ]
+  },
+  {
+    "source": "corrdiff_3km_v3/datasets/dataset.py",
+    "destination": "models/datasets/factory.py",
+    "source_sha256": "36195d688dcbe64a00ee4002c3da1831d19113cba9ca5786e7919e4debc6e8bc",
+    "ported_sha256": "8f0e938ad5dfc34d6f5cf63d8c1701910a317e5805f6c84a52a071d619983f3d",
+    "changes": [
+      "Preserve sampler and loader behavior; register only paper datasets and strict physical adapter; remove unrelated dataset imports.",
+      "Physical and frozen-interface adapters registered; quality policy passed explicitly.",
+      "Register strict physical, explicit frozen-coordinate, and preserved November 18 packed adapters."
+    ]
+  },
+  {
+    "source": "corrdiff_3km_v3/conf/config_training_aorc_regression.yaml",
+    "destination": "configs/aorc/train_regression.yaml",
+    "source_sha256": "4d46ac92629efcb0be631795a4ff3ac3b3779f96a376af830d37dbfaa83185b7",
+    "changes": [
+      "Hydra defaults composed into explicit configuration; paths portable; W&B disabled; automatic old-checkpoint deletion disabled."
+    ],
+    "ported_sha256": "708456b5380c072c6149bc46bc0fb98c9df24d7d620bf142301b7cae1d57ab7b"
+  },
+  {
+    "source": "corrdiff_3km_v3/conf/config_training_aorc_diffusion.yaml",
+    "destination": "configs/aorc/train_diffusion.yaml",
+    "source_sha256": "b71dc16bc3af055aa4c19d32c7093d9bc9f41141575eea0c5a04649eb9f1cad0",
+    "changes": [
+      "Hydra defaults composed into explicit configuration; paths portable; W&B disabled; automatic old-checkpoint deletion disabled."
+    ],
+    "ported_sha256": "44181e93c9ceb8eea2c6e620c94f71ede582f9009ae2c410acd776617e034256"
+  },
+  {
+    "source": "corrdiff_wrf_3km_v4/conf/config_training_wrf_regression.yaml",
+    "destination": "configs/wrf/train_regression.yaml",
+    "source_sha256": "3abe297839ffa90693946d298d7138b33a896df524592d8da8282addab9f8594",
+    "changes": [
+      "Hydra defaults composed into explicit configuration; paths portable; W&B disabled; automatic old-checkpoint deletion disabled."
+    ],
+    "ported_sha256": "a51ab55ece6dd3cc6edb2109055462fb836db603260faa0b50720ebdae9ea1de"
+  },
+  {
+    "source": "corrdiff_wrf_3km_v4/conf/config_training_wrf_diffusion.yaml",
+    "destination": "configs/wrf/train_diffusion.yaml",
+    "source_sha256": "aa4aa541b012ac528316d61cda23fe2d1243021db09cbe7852f106a5d0817eda",
+    "changes": [
+      "Hydra defaults composed into explicit configuration; paths portable; W&B disabled; automatic old-checkpoint deletion disabled."
+    ],
+    "ported_sha256": "51c576eb22511e79c941ea78a6740f46fea754f15adf7eab343efeda40b10baf"
+  },
+  {
+    "source": "corrdiff_conus404_era5_4km_v1/conf/config_training_regression.yaml",
+    "destination": "configs/era5_conus404/train_regression.yaml",
+    "source_sha256": "3982c3a40f71bb234c6a8f2008fe744d25861b5fde2971a096c4e43bb60bad57",
+    "changes": [
+      "Hydra defaults composed into explicit configuration; paths portable; W&B disabled; automatic old-checkpoint deletion disabled."
+    ],
+    "ported_sha256": "ef6b86bce13b31b4f146f1c58a197ef783800132b9462437c442ce0f9866f468"
+  },
+  {
+    "source": "corrdiff_conus404_era5_4km_v1/conf/config_training_diffusion.yaml",
+    "destination": "configs/era5_conus404/train_diffusion.yaml",
+    "source_sha256": "a1aa99491a746e8bbb94d3e504aa35e5e940e7ca642ae322beb5ca7a284aedd1",
+    "changes": [
+      "Hydra defaults composed into explicit configuration; paths portable; W&B disabled; automatic old-checkpoint deletion disabled."
+    ],
+    "ported_sha256": "19f00fbdb894a8d55ef9946eac46c1553e66a17fba10be2a0b48847133410bf6"
+  },
+  {
+    "source_configuration_container": "corrdiff_3km_v3/all_aorc_12km_to_3km.nc",
+    "destination": "configs/aorc/generate.yaml",
+    "changes": [
+      "Only configuration metadata extracted; no arrays/results copied.",
+      "Historical checkpoint basename retained; directories portable."
+    ],
+    "ported_sha256": "738c21c6f80003f1c9ef221839935389330fcd96832cc47f25b65410be4eece7"
+  },
+  {
+    "source_configuration_container": "corrdiff_wrf_3km_v4/all_wrf_12km_to_3km_32ens_200sam.nc",
+    "destination": "configs/wrf/generate.yaml",
+    "changes": [
+      "Only configuration metadata extracted; no arrays/results copied.",
+      "Historical checkpoint basename retained; directories portable.",
+      "WRF diffusion source label referenced deleted v6 directory; exact lineage unverified."
+    ],
+    "ported_sha256": "e7169c5788e00745c18ac61b2a6bd8ff3634a1ef2476d30507f0f67e81ca5db6"
+  },
+  {
+    "source_configuration_container": "corrdiff_conus404_era5_4km_v1/all_era5_to_conus404_200sam_32ens_670016.nc",
+    "destination": "configs/era5_conus404/generate.yaml",
+    "changes": [
+      "Only configuration metadata extracted; no arrays/results copied.",
+      "Historical checkpoint basename retained; directories portable."
+    ],
+    "ported_sha256": "fb59c11d3774787fd34b3af556030f98e826f5a41132a7fe18b445dec8458dcb"
+  },
+  {
+    "source": "corrdiff_3km_v3/revision_audit_2026-11-18/r2_comment3_corrected_paired/paired_dataset.py",
+    "destination": "legacy/aorc/matched_packed_dataset.py",
+    "source_sha256": "abd8e2a1e4860a85da595df988ca834f2cd95ff9b7f424e117fe0b2304567050",
+    "ported_sha256": "8ef6756f71947a50ec0109caf37cdfab7c91a57f4315d74f5e4c801e8fd441c1",
+    "changes": [
+      "Import path rewrite only; exact match independently checked."
+    ]
+  }
+]

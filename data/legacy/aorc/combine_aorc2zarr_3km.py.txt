@@ -1,0 +1,195 @@
+# %%
+#!/usr/bin/env python3
+"""
+FAST & SAFE APPEND PIPELINE (AORC 4km)
+1. Appends year-by-year (Low Memory, Fast Start).
+2. Uses Zarr Synchronizer (Fixes 'Vertical Seam' corruption).
+3. Writes Lat/Lon only once at the end.
+4. CHUNKING: Time & Channel only. Spatial dimensions (Lat/Lon) are contiguous.
+"""
+
+import shutil
+import xarray as xr
+import zarr
+import pandas as pd
+from pathlib import Path
+from numcodecs import Blosc
+from dask.distributed import Client
+
+# ================= CONFIGURATION =================
+IN_DIR = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+OUT_ZARR = Path("/scr/hyousefi/corrdiff_datasets/paperdata/aorc_4km_2000_2012.zarr")
+SYNC_PATH = Path("/scr/hyousefi/corrdiff_datasets/paperdata/zarr_sync_4km.group")
+
+YEARS = list(range(2000, 2013))
+
+# Chunking Config
+TIME_CHUNK = 240
+CHANNEL_CHUNK = 8
+# Note: Spatial chunks are set to -1 (Full Size) dynamically below
+
+COMPRESSOR = Blosc(cname='lz4', clevel=5, shuffle=Blosc.SHUFFLE)
+
+def build_dataset_fast_append(client):
+    print(f"=== FAST APPEND PIPELINE (4km) ===")
+    
+    # 1. Clean previous attempts
+    if OUT_ZARR.exists():
+        print(f"Removing old file: {OUT_ZARR}")
+        shutil.rmtree(OUT_ZARR)
+    if SYNC_PATH.exists():
+        shutil.rmtree(SYNC_PATH)
+
+    # 2. Setup Synchronizer (CRITICAL FIX FOR SEAMS)
+    synchronizer = zarr.ProcessSynchronizer(str(SYNC_PATH))
+
+    total_time_steps = 0
+
+    for i, year in enumerate(YEARS):
+        path = IN_DIR / f"aorc_4km_{year}.zarr"
+        print(f"Processing {year} ({i+1}/{len(YEARS)})...")
+        
+        if not path.exists():
+            print(f"❌ Error: Source file not found: {path}")
+            continue
+
+        # A. Open Source
+        ds = xr.open_zarr(path, consolidated=False)
+        da = ds["aorc"]
+        
+        # B. Rechunk to Target (Time Only, Full Spatial)
+        da.encoding = {} 
+        da = da.chunk({
+            "time": TIME_CHUNK, 
+            "channel": CHANNEL_CHUNK, 
+            "y": -1,  # Full size (contiguous)
+            "x": -1   # Full size (contiguous)
+        })
+        
+        # Get exact spatial shape for encoding
+        y_size, x_size = da.shape[2], da.shape[3]
+
+        # C. Create Write Object (Data Only - No Coords)
+        ds_write = xr.Dataset({"aorc": da})
+        ds_write = ds_write.drop_vars(["lat", "lon", "aorc_variable", "x", "y", "time"], errors="ignore")
+
+        # D. Write
+        if i == 0:
+            print("  -> Mode: 'w' (Create)")
+            # Explicitly set chunks in encoding to match dask chunks
+            encoding = {
+                "aorc": {
+                    "compressor": COMPRESSOR, 
+                    "chunks": (TIME_CHUNK, CHANNEL_CHUNK, y_size, x_size)
+                }
+            }
+            
+            ds_write.to_zarr(
+                OUT_ZARR, 
+                mode="w", 
+                encoding=encoding, 
+                compute=True, 
+                safe_chunks=False, 
+                synchronizer=synchronizer
+            )
+        else:
+            print("  -> Mode: 'a' (Append)")
+            ds_write.to_zarr(
+                OUT_ZARR, 
+                append_dim="time", 
+                compute=True, 
+                safe_chunks=False, 
+                synchronizer=synchronizer
+            )
+        
+        total_time_steps += da.shape[0]
+
+    # Cleanup lock files
+    if SYNC_PATH.exists():
+        shutil.rmtree(SYNC_PATH)
+        
+    print(f"✓ Data Write Complete. Total steps: {total_time_steps}")
+    return total_time_steps
+
+def inject_metadata_final(total_len):
+    print("\n=== Injecting Metadata & Coordinates ===")
+    
+    # 1. Load Static Coords (from Year 2000)
+    src_path = IN_DIR / f"aorc_4km_{YEARS[0]}.zarr"
+    ds_src = xr.open_zarr(src_path)
+    
+    lat = ds_src["lat"].load()
+    lon = ds_src["lon"].load()
+    vars_ = ds_src["aorc_variable"].load()
+    
+    # 2. Generate Time
+    dates = pd.date_range(start="2000-01-01", periods=total_len, freq="h")
+    
+    # 3. Write Directly to Zarr
+    group = zarr.open_group(str(OUT_ZARR), mode='r+')
+    
+    print("  Writing static coordinates...")
+    
+    # --- Time ---
+    if "time" in group: del group["time"]
+    group.create_dataset("time", data=dates.values.astype("int64"), shape=(total_len,), chunks=(total_len,), overwrite=True)
+    group["time"].attrs["_ARRAY_DIMENSIONS"] = ["time"]
+    group["time"].attrs["units"] = "nanoseconds since 1970-01-01"
+    group["time"].attrs["calendar"] = "proleptic_gregorian"
+
+    # --- Lat (Contiguous / Single Chunk) ---
+    if "lat" in group: del group["lat"]
+    # chunks=False ensures a single contiguous block
+    group.create_dataset("lat", data=lat.values, chunks=False, overwrite=True)
+    group["lat"].attrs["_ARRAY_DIMENSIONS"] = ["y", "x"]
+
+    # --- Lon (Contiguous / Single Chunk) ---
+    if "lon" in group: del group["lon"]
+    # chunks=False ensures a single contiguous block
+    group.create_dataset("lon", data=lon.values, chunks=False, overwrite=True)
+    group["lon"].attrs["_ARRAY_DIMENSIONS"] = ["y", "x"]
+
+    # --- Variables ---
+    if "aorc_variable" in group: del group["aorc_variable"]
+    group.create_dataset("aorc_variable", data=vars_.values, overwrite=True)
+    group["aorc_variable"].attrs["_ARRAY_DIMENSIONS"] = ["channel"]
+
+    zarr.consolidate_metadata(str(OUT_ZARR))
+    print("✅ Pipeline Complete.")
+
+if __name__ == "__main__":
+    client = Client() 
+    print(f"Cluster: {client.dashboard_link}")
+    
+    total_steps = build_dataset_fast_append(client)
+    inject_metadata_final(total_steps)
+
+#%%
+import zarr
+
+# NOTE: Updated to your new 4km output path
+ZARR_PATH = "/scr/hyousefi/corrdiff_datasets/paperdata/aorc_4km_2000_2012.zarr"
+
+def patch_coordinates():
+    print(f"Patching metadata for: {ZARR_PATH}")
+    
+    # Open in read-write mode
+    group = zarr.open_group(ZARR_PATH, mode='r+')
+    
+    # Get existing attributes for the main variable
+    aorc_attrs = group["aorc"].attrs.asdict()
+    
+    # Add the coordinates tag
+    # This tells Xarray: "When you load 'aorc', attach these variables as coords"
+    aorc_attrs["coordinates"] = "lat lon aorc_variable"
+    
+    # Save back to Zarr
+    group["aorc"].attrs.put(aorc_attrs)
+    
+    # Refresh metadata
+    zarr.consolidate_metadata(ZARR_PATH)
+    print("✅ Metadata patched! You can now plot without .set_coords()")
+
+if __name__ == "__main__":
+    patch_coordinates()
+# %%

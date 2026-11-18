@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "source_files": [
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/download_aorc.sh.txt",
+      "sha256": "224980c3b691c61465c2c8eea7d2f08aa3878c90c908e2a78fa0c512cdddc5e7",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/Grid_aorc.py.txt",
+      "sha256": "294a63674f19cdc941186ce93b2f3476eeb683e34368b1a001e19d95a61eafc6",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/aorc2zarr_3km.py.txt",
+      "sha256": "48b9cd548a2f9804dc5cff40fbaa267404316cba6b33a6662093d4b23e544a33",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/aorc2zarr_12km_2_3km.py.txt",
+      "sha256": "e91ddc52ca1f2b5d036aa38b444b01506e6232d415e4727598c29b77aca100d3",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/aorc2zarr_4km.py.txt",
+      "sha256": "5b71e2fd9d177ec91130c4f82c2429658dce4642c141f5e7883c71aa8d8d88a3",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/aorc2zarr_28km_2_4km.py.txt",
+      "sha256": "d3924c96dc83cfc92573d21b5ae6cd69f72350c67681e00a7de5f90e12842627",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/combine_and_resample_6h.py.txt",
+      "sha256": "cee8e1c6819f604d04893c81bcffb99db62b1fdf291736e2a4b8bc96c4ed813a",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/combine_aorc2zarr_12km_2_3km.py.txt",
+      "sha256": "d14ddeca9952bb9d6823ff8aa2571f46f596fe6289aa57e2e9f104e1b2d25465",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/combine_aorc2zarr_3km.py.txt",
+      "sha256": "d4dcc71ea49719bb8620f2ee115cddf17fd5286543485b0937deca093381dbc5",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "aorc",
+      "archive_path": "data/legacy/aorc/combine_aorc_fixed.py.txt",
+      "sha256": "ef2709b8a0b8c99628f8404dc1cfd4714573cedc6d34a023f9119680b922d92c",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "era5",
+      "archive_path": "data/legacy/era5/Downlod_ERA5_single_levels.py.txt",
+      "sha256": "eab43ea0bb8defd2addc592f39b093979451cb50fdee765604ab480868f40104",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "era5",
+      "archive_path": "data/legacy/era5/Downlod_ERA5_multi_levels.py.txt",
+      "sha256": "c569bad97ec6dd21534a6bb87c983a1bf2807ef24058b7b3cb798c1836cc0599",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "era5",
+      "archive_path": "data/legacy/era5/era5_28_2_4km_zarr.py.txt",
+      "sha256": "3dc88004c349c6118da329eabe84c22c4732e3774a4827f5483e86edde8c89a8",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "era5",
+      "archive_path": "data/legacy/era5/combine_zarr_4km.py.txt",
+      "sha256": "c377e16dca769c483b2e63e6b8092cb0976f2e64837c54a5f92c89315eb10f1a",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "conus404",
+      "archive_path": "data/legacy/conus404/conus2zarr_4km.py.txt",
+      "sha256": "197a6f6dca7d0aac43f796db5e9f482e595e7ff66601a4e8fddd0b69b40272cd",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "conus404",
+      "archive_path": "data/legacy/conus404/Combine_conus2zarr_4km.py.txt",
+      "sha256": "e4f3764e9855eb0cdaabbb77dff56a029f334f571e5122bc26e1271043e107cf",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "conus404",
+      "archive_path": "data/legacy/conus404/planetarycomputer__pc_dask_V7.py.txt",
+      "sha256": "b24ea371c3b689db7015557496ff0bff391de530fb8eb99e0c9427b87715a4fc",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "shared",
+      "archive_path": "data/legacy/shared/create_land_ocean_masks.py.txt",
+      "sha256": "831a6fc6942e75c135e3f3988ab2585c46fc129368cfcec4d7483ef667ba8cb9",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "shared",
+      "archive_path": "data/legacy/shared/aorc_to_6hourly.py.txt",
+      "sha256": "e35ab5bfbbdae4d5eb5a1f5ee006feca090db009bd95a0e859b530a2d27f056f",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "shared",
+      "archive_path": "data/legacy/shared/aorc_to_6hourly_v2.py.txt",
+      "sha256": "19e8281103c89d60a77f19d45bddd7a354b73b1997ca7e7ac63377da40a1c817",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "shared",
+      "archive_path": "data/legacy/shared/aorc_to_6hourly_v3.py.txt",
+      "sha256": "5374e93409c8d9b026523ef9526af9ecb59de542159dfd08e78b6c823d18f7af",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "shared",
+      "archive_path": "data/legacy/shared/aorc_to_6hourly_v4.py.txt",
+      "sha256": "5c69709548e9d3303b9824b20c9826fffad80b0ece119d48453802c79ff72db2",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "shared",
+      "archive_path": "data/legacy/shared/wrf_time_fix.py.txt",
+      "sha256": "ebd77fddf79504f92720df2cb9a6f8caf342d205889e690ec871cfcd0b71de35",
+      "provenance_status": "recovered source; exact historical invocation not fully established",
+      "executable": false
+    },
+    {
+      "family": "matched_paired",
+      "archive_path": "data/legacy/matched_paired/build_aligned_inputs.py.txt",
+      "sha256": "d893060519b9e1a6b8a45701e79deb5b18e3d5b0f6e25e47c8ebafe53d4a577b",
+      "provenance_status": "verified executed Nov18 paired-comparison preparation",
+      "executable": false
+    },
+    {
+      "family": "matched_paired",
+      "archive_path": "data/legacy/matched_paired/prepare_configs_and_reference.py.txt",
+      "sha256": "a093441b764ec03ce148e165b0e731f0eb1fe24a82709aa7f6e41aa78ebb20d7",
+      "provenance_status": "verified executed Nov18 paired-comparison preparation",
+      "executable": false
+    },
+    {
+      "family": "matched_paired",
+      "archive_path": "data/legacy/matched_paired/check_original_forward_reconstruction.py.txt",
+      "sha256": "337ad11197aa982fad62562c84077cb4812b7070367625eb428892454fc712d4",
+      "provenance_status": "verified executed Nov18 paired-comparison preparation",
+      "executable": false
+    }
+  ],
+  "wrf_original_writer": "not recovered; provider Hsin-I Chang; no public endpoint assumed"
+}

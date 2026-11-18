@@ -1,0 +1,40 @@
+{
+  "upstream_repository": "https://github.com/NVIDIA/physicsnemo.git",
+  "base_commit": "1b1034027f72800d085fd8f01b6945d32e693f8b",
+  "installed_version_observed": "1.2.0a0",
+  "patch": "physicsnemo-local.patch",
+  "patch_sha256": "bbd6bb66f82dabbecbb729e405dbd4615e90fc82b5d8e5fe1833b039af43fc8d",
+  "files": [
+    {
+      "path": "physicsnemo/models/diffusion/layers.py",
+      "base_sha256": "e4906d3db820ccbc4b70763aa717660a107a266192f6b2bca1913e86ffc449fe",
+      "patched_sha256": "6cd1512d8db9c66e77d80990db95808c7102019ade85845f94243a09941c180d"
+    },
+    {
+      "path": "physicsnemo/models/diffusion/preconditioning.py",
+      "base_sha256": "254fbc6c14b1b9d50444768f564dabed0e3c5b6ab68cfbb0924db1a6e533199c",
+      "patched_sha256": "b92dde453694a5477783897d34682a473ac984f3b9c1a0b5a8c577fa60f350af"
+    },
+    {
+      "path": "physicsnemo/models/diffusion/song_unet.py",
+      "base_sha256": "ef832d1f90ceadb6993d4082c0d675e090fe319ecfd30fe392c019eacc9601ef",
+      "patched_sha256": "3a4e2dfbd7a6325a817fd06bd7e4dd67eea94b740e42acc6aa20ba6620c09f30"
+    },
+    {
+      "path": "physicsnemo/models/diffusion/unet.py",
+      "base_sha256": "633ae986dfaa542395e668cfd58f805812fe48f0764dd8ac94fb559a99355ada",
+      "patched_sha256": "5b3c517ca67fd7314471237042b3341dda387c18a851de0a05a817171e1fcec9"
+    },
+    {
+      "path": "physicsnemo/models/module.py",
+      "base_sha256": "58dfd135cb1289342b39f20e76e33fb4e59cefb454146966d53fd6920dec6431",
+      "patched_sha256": "a14cac15d45526882f79f7dacdf7fa7a5571b40a72d5fe58df8e9f8fb9fff1d2"
+    },
+    {
+      "path": "physicsnemo/utils/corrdiff/utils.py",
+      "base_sha256": "5ccb47a5f4f02c2873b1febb74327ac90737707e495b9a8b71fca2a2cdc6d27a",
+      "patched_sha256": "d083681ecf6382000c81d83751dd2c229a502f140a366f3fc21c21168f945469"
+    }
+  ],
+  "scope": "Local PhysicsNeMo core modifications present in the audited research environment. Checkpoint lineage must be checked separately."
+}

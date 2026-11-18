@@ -1,0 +1,290 @@
+# %%
+"""
+CONUS404 REGRIDDING: 4km (Native) -> 4km (Arizona Reference Grid)
+BATCH PROCESSOR (2000-2013)
+
+FIXES APPLIED:
+  1. PROJECTION: Uses correct WRF params (lat_1=33.0, lat_2=45.0) to fix spatial shift.
+  2. INTERPOLATION: Uses (fill_value=None, bounds_error=False) to allow extrapolation.
+  3. ENCODING: Wipes all source metadata to prevent Integer/Float conflicts.
+"""
+
+from pathlib import Path
+import shutil
+import numpy as np
+import xarray as xr
+import dask.array as da
+from pyproj import Proj
+from numcodecs import Blosc
+
+# ================= CONFIGURATION =================
+# Years to process (Start inclusive, End exclusive)
+# This will process 2000, 2001, ..., 2012
+YEARS = list(range(2000, 2013))
+
+# Input/Output Directories
+# NOTE: Adjust the input pattern if your filenames differ slightly
+SOURCE_DIR = Path("/scr/hyousefi/conus404")
+REF_GRID_PATH = Path("/home/hyousefi/data/AORC/aorc_reference_grids/aorc_refgrid_4km.nc")
+OUT_DIR = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+
+# Variables to regrid
+VARS_TO_REGRID = ["GLW", "SWDOWN", "PSFC", "Q2", "T2", "U10", "V10", "PREC_ACC_NC"]
+
+# Chunking (T, Y, X) - Optimized for GPU training
+CHUNKS = {"time": 672, "y": 256, "x": 256}
+
+# ================= HELPERS =================
+def get_conus404_proj():
+    """
+    Returns the CORRECT CONUS404 projection parameters.
+    Fixes the spatial shift issues.
+    """
+    return Proj(
+        proj="lcc",
+        lat_1=33.0,  # <--- FIXED (Was 30.0)
+        lat_2=45.0,  # <--- FIXED (Was 60.0)
+        lat_0=40.0,
+        lon_0=-97.0,
+        a=6370000,
+        b=6370000,
+        units="m",
+        no_defs=True
+    )
+
+def process_year(year):
+    """Regrids a single year of CONUS404 data."""
+    
+    # Define paths
+    # Assuming your input files are named like: conus404_2000_subset_AZ.zarr
+    source_zarr = SOURCE_DIR / f"conus404_{year}_subset_AZ.zarr"
+    out_zarr = OUT_DIR / f"conus404_4km_{year}.zarr"
+
+    if not source_zarr.exists():
+        print(f"SKIPPING {year}: Source file not found at {source_zarr}")
+        return
+
+    print(f"\n=== Processing Year {year} ===")
+    print(f"Source: {source_zarr}")
+    
+    ds_src = xr.open_zarr(source_zarr, consolidated=True)
+    ds_ref = xr.open_dataset(REF_GRID_PATH)
+
+    # --- 1. COORDINATE SETUP ---
+    p = get_conus404_proj()
+    
+    # A. Reconstruct Source (x,y)
+    # We create 1D x/y axes for efficient interpolation
+    src_x_2d, src_y_2d = p(ds_src["lon"].values, ds_src["lat"].values)
+    
+    ds_src = ds_src.assign_coords({
+        "x": (("west_east",), src_x_2d[0, :]),
+        "y": (("south_north",), src_y_2d[:, 0])
+    }).swap_dims({"west_east": "x", "south_north": "y"})
+
+    # B. Project Target (x,y)
+    if "LAT2D" in ds_ref:
+        tgt_lat, tgt_lon = ds_ref["LAT2D"].values, ds_ref["LON2D"].values
+    else:
+        tgt_lat, tgt_lon = ds_ref["lat"].values, ds_ref["lon"].values
+
+    tgt_x_vals, tgt_y_vals = p(tgt_lon, tgt_lat)
+    
+    # Create Indexers
+    x_indexer = xr.DataArray(tgt_x_vals, dims=("y", "x"))
+    y_indexer = xr.DataArray(tgt_y_vals, dims=("y", "x"))
+
+    # --- 2. INTERPOLATION ---
+    print(f"  Interpolating {len(VARS_TO_REGRID)} variables...")
+    ds_subset = ds_src[VARS_TO_REGRID]
+    
+    # Using fill_value=None allows extrapolation (valid for 4km->4km slight mismatch)
+    ds_regridded = ds_subset.interp(
+        x=x_indexer,
+        y=y_indexer,
+        method="linear",
+        kwargs={"fill_value": None, "bounds_error": False}
+    )
+
+    # --- 3. SANITIZATION (The "Nuclear" Clean-up) ---
+    print("  Sanitizing metadata...")
+
+    # Assign correct Lat/Lon
+    ds_regridded = ds_regridded.assign_coords({
+        "lat": (("y", "x"), tgt_lat),
+        "lon": (("y", "x"), tgt_lon),
+    }).drop_vars(["x", "y", "south_north", "west_east"], errors="ignore")
+
+    # Clean Data Variables
+    for v in VARS_TO_REGRID:
+        # Force float32 (removes integer packing issues)
+        ds_regridded[v] = ds_regridded[v].astype(np.float32)
+        
+        # Remove colliding attributes
+        if "_FillValue" in ds_regridded[v].attrs: del ds_regridded[v].attrs["_FillValue"]
+        if "missing_value" in ds_regridded[v].attrs: del ds_regridded[v].attrs["missing_value"]
+        
+        # Wipe internal encoding
+        ds_regridded[v].encoding = {}
+
+    # Clean Coordinate Encoding
+    for coord in ds_regridded.coords:
+        ds_regridded[coord].encoding = {}
+
+    # --- 4. SAVE ---
+    if out_zarr.exists():
+        print(f"  Removing existing output: {out_zarr}")
+        shutil.rmtree(out_zarr)
+
+    print(f"  Rechunking to {CHUNKS}...")
+    ds_regridded = ds_regridded.chunk(CHUNKS)
+
+    print(f"  Writing Zarr to: {out_zarr}")
+    
+    compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.SHUFFLE)
+    
+    # Explicitly set encoding to use NaN for missing values
+    encoding = {}
+    for v in VARS_TO_REGRID:
+        encoding[v] = {
+            "compressor": compressor, 
+            "_FillValue": np.nan, 
+            "dtype": "float32"
+        }
+
+    ds_regridded.to_zarr(out_zarr, mode="w", encoding=encoding, consolidated=True)
+    print(f"✓ Year {year} Done!")
+
+# ================= MAIN EXECUTION =================
+if __name__ == "__main__":
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    
+    print(f"Starting batch job for years: {YEARS}")
+    for yr in YEARS:
+        try:
+            process_year(yr)
+        except Exception as e:
+            print(f"!!! ERROR processing {yr}: {e}")
+            # Optional: raise e # Uncomment to stop on first error
+            
+    print("\nBatch Processing Complete.")
+# %%
+
+
+# %%
+# import matplotlib.pyplot as plt
+# import cartopy.crs as ccrs
+# import cartopy.feature as cfeature
+# import xarray as xr
+# import numpy as np
+# from pyproj import Proj
+
+# # ================= CONFIG =================
+# SOURCE_ZARR = "/scr/hyousefi/conus404/conus404_2012_subset_AZ.zarr"
+# REF_GRID_PATH = "/home/hyousefi/data/AORC/aorc_reference_grids/aorc_refgrid_4km.nc"
+# VAR_NAME = "T2" 
+# TIME_INDEX = 12
+
+# # ================= HELPERS =================
+# def get_conus404_proj():
+#     """
+#     Returns the CORRECT CONUS404 projection parameters.
+#     Based on Rasmussen et al. (2023) / WRF Standard CONUS setup.
+#     """
+#     return Proj(
+#         proj="lcc",
+#         lat_1=33.0,  # <--- FIXED (Was 30.0)
+#         lat_2=45.0,  # <--- FIXED (Was 60.0)
+#         lat_0=40.0,
+#         lon_0=-97.0,
+#         a=6370000,
+#         b=6370000,
+#         units="m",
+#         no_defs=True
+#     )
+
+# # ================= MAIN =================
+# print("1. Loading Datasets...")
+# ds_src = xr.open_zarr(SOURCE_ZARR, consolidated=True)
+# ds_ref = xr.open_dataset(REF_GRID_PATH)
+
+# # --- 2. SETUP COORDINATES ---
+# print("2. Setting up projection (using lat_1=33.0, lat_2=45.0)...")
+# p = get_conus404_proj()
+
+# # Source: Lat/Lon -> x/y
+# # We calculate x/y in meters for the source dataset
+# src_x_2d, src_y_2d = p(ds_src["lon"].values, ds_src["lat"].values)
+
+# # --- 3. LOAD DATA INTO MEMORY ---
+# print(f"3. Loading source slice for {VAR_NAME} into memory...")
+# # We use .compute() to get a pure Numpy array, ensuring no metadata conflicts
+# da_src_numpy = ds_src[VAR_NAME].isel(time=TIME_INDEX).compute()
+
+# # Build a clean DataArray for interpolation
+# # We use the calculated x/y (meters) as the dimensions
+# da_clean = xr.DataArray(
+#     da_src_numpy.values.astype(np.float32),
+#     dims=("south_north", "west_east"),
+#     coords={
+#         "x": (("west_east",), src_x_2d[0, :]),
+#         "y": (("south_north",), src_y_2d[:, 0])
+#     },
+#     name=VAR_NAME
+# ).swap_dims({"west_east": "x", "south_north": "y"})
+
+# # --- 4. PREPARE TARGET GRID ---
+# # Get target Lat/Lon
+# if "LAT2D" in ds_ref:
+#     tgt_lat = ds_ref["LAT2D"].values
+#     tgt_lon = ds_ref["LON2D"].values
+# else:
+#     tgt_lat = ds_ref["lat"].values
+#     tgt_lon = ds_ref["lon"].values
+
+# # Project Target Lat/Lon -> x/y (meters)
+# tgt_x_vals, tgt_y_vals = p(tgt_lon, tgt_lat)
+
+# # Create Indexers
+# x_indexer = xr.DataArray(tgt_x_vals, dims=("y", "x"))
+# y_indexer = xr.DataArray(tgt_y_vals, dims=("y", "x"))
+
+# # --- 5. INTERPOLATE ---
+# print("4. Regridding (in memory)...")
+
+# # We use fill_value=None and bounds_error=False to allow safe extrapolation
+# da_regridded = da_clean.interp(
+#     x=x_indexer,
+#     y=y_indexer,
+#     method="linear",
+#     kwargs={"fill_value": None, "bounds_error": False}
+# )
+
+# # --- 6. PLOT ---
+# print("5. Plotting...")
+# plt.figure(figsize=(12, 10))
+# ax = plt.axes(projection=ccrs.PlateCarree())
+
+# # Add Borders and States - Crucial for checking the shift!
+# ax.add_feature(cfeature.BORDERS, linestyle='-', linewidth=2, edgecolor='black')
+# ax.add_feature(cfeature.STATES, linestyle=':', linewidth=1.5, edgecolor='black')
+# ax.coastlines(resolution='10m', color='black', linewidth=1)
+
+# mesh = ax.pcolormesh(
+#     tgt_lon, 
+#     tgt_lat, 
+#     da_regridded, 
+#     transform=ccrs.PlateCarree(),
+#     cmap="turbo",
+#     shading="auto"
+# )
+
+# plt.colorbar(mesh, label=f"{VAR_NAME} (K)")
+# plt.title(f"CONUS404 (Corrected Projection: 33/45)\nTarget Grid: {tgt_lat.shape}")
+# ax.gridlines(draw_labels=True, linestyle='--', alpha=0.5)
+
+# plt.show()
+# print("Done.")
+
+
+# %%

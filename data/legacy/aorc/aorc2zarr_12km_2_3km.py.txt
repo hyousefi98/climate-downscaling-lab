@@ -1,0 +1,183 @@
+#%%
+#!/usr/bin/env python3
+"""
+DYNAMIC ALIGNMENT (FIXED CENTROIDS & TIME)
+1km -> 12km -> 3km
+
+• Logic: Uses "Factor 4" math to align centroids.
+• 12km pixel center = Index 1.5 of the underlying 3km grid.
+• Fixes time coordinate to be datetime64[s].
+• CHUNKING: STRICTLY TIME ONLY. Spatial dimensions are contiguous (-1).
+"""
+
+from pathlib import Path
+import shutil
+import math
+import numpy as np
+import xarray as xr
+import zarr
+import dask.array as da
+from dask.distributed import Client
+from numcodecs import Blosc
+
+# ================= CONFIG =================
+YEAR_LIST = list(range(2000, 2013))
+
+AORC_BASE_DIR = Path("/scr/hyousefi/aorc")
+OUT_DIR = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# TARGET GRID IS NOW 3KM
+REF_GRID_3KM  = Path("/home/hyousefi/data/AORC/aorc_reference_grids/aorc_refgrid_3km.nc")
+
+AORC_VARS = [
+    "APCP_surface", "DLWRF_surface", "DSWRF_surface", "PRES_surface",
+    "SPFH_2maboveground", "TMP_2maboveground", "UGRD_10maboveground", "VGRD_10maboveground",
+]
+
+# Chunking Configuration
+TIME_CHUNK_OUT = 240
+DTYPE = "float32"
+
+# ================= MAIN =================
+def build_synthetic_aligned_12km():
+    client = Client()
+    print(f"Cluster started: {client.dashboard_link}")
+
+    # 1. ANALYZE MASTER 3KM GRID
+    print("Loading Master 3km Grid...")
+    ds_3  = xr.open_dataset(REF_GRID_3KM)
+
+    if "LAT2D" in ds_3:
+        lat_3 = ds_3["LAT2D"].values.astype(DTYPE)
+        lon_3 = ds_3["LON2D"].values.astype(DTYPE)
+    else:
+        lat_3 = ds_3["lat"].values.astype(DTYPE)
+        lon_3 = ds_3["lon"].values.astype(DTYPE)
+
+    ny_3, nx_3 = lat_3.shape
+    
+    # 2. PADDING (Divisible by 4)
+    # Factor = 12km / 3km = 4
+    FACTOR = 4
+    
+    pad_y = (FACTOR - (ny_3 % FACTOR)) % FACTOR
+    pad_x = (FACTOR - (nx_3 % FACTOR)) % FACTOR
+    
+    ny_padded_3km = ny_3 + pad_y
+    nx_padded_3km = nx_3 + pad_x
+    
+    # Input 1km size (Multiplier 3)
+    # Because 3km pixel = 3x3 1km pixels
+    ny_in_1km = ny_padded_3km * 3
+    nx_in_1km = nx_padded_3km * 3
+
+    print(f"Original 3km Grid: {ny_3}x{nx_3}")
+    print(f"Padded 3km Grid:   {ny_padded_3km}x{nx_padded_3km} (Divisible by {FACTOR})")
+
+    # Bounds
+    min_lat, max_lat = lat_3.min(), lat_3.max()
+    min_lon, max_lon = lon_3.min(), lon_3.max()
+
+    for year in YEAR_LIST:
+        print(f"\nProcessing {year}...")
+        in_root = AORC_BASE_DIR / f"{year}.zarr"
+        out_zarr = OUT_DIR / f"aorc_12km_2_3km_{year}.zarr"
+
+        if out_zarr.exists():
+            shutil.rmtree(out_zarr)
+
+        # 3. FIND START INDICES
+        lat_in = zarr.open_array(str(in_root / "latitude"))[:]
+        lon_in = zarr.open_array(str(in_root / "longitude"))[:]
+
+        iy_start = np.abs(lat_in - min_lat).argmin()
+        ix_start = np.abs(lon_in - min_lon).argmin()
+
+        if lat_in[0] > lat_in[-1]: 
+             iy_start = np.abs(lat_in - max_lat).argmin()
+
+        print(f"  Slicing 1km at: y={iy_start}:{iy_start+ny_in_1km}, x={ix_start}:{ix_start+nx_in_1km}")
+
+        # 4. PROCESS
+        data_arrays = []
+
+        for v in AORC_VARS:
+            # A. Load & Crop
+            arr = da.from_zarr(str(in_root / v))
+            arr = arr[:, iy_start : iy_start + ny_in_1km, ix_start : ix_start + nx_in_1km]
+            
+            # B. Rechunk: TIME ONLY
+            # 0=Time (chunked), 1=Y (Full), 2=X (Full)
+            t_chunk = min(TIME_CHUNK_OUT, arr.shape[0])
+            arr = arr.rechunk({0: t_chunk, 1: -1, 2: -1})
+
+            # C. Coarsen 1km -> 12km
+            # 12km = 12 x 1km pixels
+            da_1km = xr.DataArray(arr, dims=("time", "y", "x"), name=v)
+            da_12km = da_1km.coarsen(y=12, x=12, boundary="trim").mean()
+            
+            # --- D. CORRECT INTERPOLATION (CENTROID ALIGNMENT) ---
+            # Factor 4 alignment: Blocks are 0-3. Center is 1.5. Formula: 1.5 + 4*i
+            ny_12, nx_12 = da_12km.shape[1], da_12km.shape[2]
+            
+            y_coords_12 = 1.5 + 4.0 * np.arange(ny_12)
+            x_coords_12 = 1.5 + 4.0 * np.arange(nx_12)
+            
+            da_12km = da_12km.assign_coords(y=y_coords_12, x=x_coords_12)
+            
+            # Target Coords (3km integer grid)
+            y_target = np.arange(ny_padded_3km)
+            x_target = np.arange(nx_padded_3km)
+            
+            # Interpolate
+            da_3km_padded = da_12km.interp(
+                y=y_target, 
+                x=x_target, 
+                method="linear", 
+                kwargs={"fill_value": "extrapolate"}
+            )
+            
+            # E. POST-PROCESS
+            if v == "APCP_surface":
+                da_3km_padded = da_3km_padded.where(da_3km_padded >= 0, 0)
+
+            # F. CROP BACK TO ORIGINAL SIZE
+            da_3km_final = da_3km_padded.isel(y=slice(0, ny_3), x=slice(0, nx_3))
+
+            data_arrays.append(da_3km_final.astype(DTYPE))
+
+        # 5. SAVE
+        ds = xr.Dataset()
+        combined = xr.concat(data_arrays, dim="channel")
+        ds["aorc"] = combined.transpose("time", "channel", "y", "x")
+        
+        # --- FIX: FORCE TIME TO DATETIME OBJECTS ---
+        time_raw = da.from_zarr(str(in_root / "time"))
+        time_dates = time_raw.astype("datetime64[s]")
+
+        ds = ds.assign_coords({
+            "time": time_dates,
+            "lat": (("y", "x"), lat_3),
+            "lon": (("y", "x"), lon_3),
+            "aorc_variable": (("channel",), np.array(AORC_VARS, dtype="S64"))
+        })
+
+        compressor = Blosc(cname='lz4', clevel=5, shuffle=Blosc.SHUFFLE)
+        encoding = {"aorc": {"compressor": compressor}}
+
+        print("  Writing Zarr (Time=240, Spatial=Full, Channel=1)...")
+        # Chunking: Time=240, Channel=1 (Safe size), Y/X=Full (-1)
+        ds = ds.chunk({
+            "time": TIME_CHUNK_OUT, 
+            "channel": 1, 
+            "y": -1, 
+            "x": -1
+        })
+
+        ds.to_zarr(out_zarr, mode="w", encoding=encoding, compute=True)
+        print(f"✓ Finished {year}")
+
+if __name__ == "__main__":
+    build_synthetic_aligned_12km()
+# %%

@@ -1,0 +1,150 @@
+#%%
+#!/usr/bin/env python3
+"""
+ARIZONA SUBSET (FIXED TIME): AORC 1km (CONUS) -> AORC 3km (Arizona Ref Grid)
+
+• FIXED: Explicitly converts time to datetime64[s] to avoid "1970" error.
+• Loads Arizona reference grid.
+• Slices the huge CONUS 1km file to the Arizona window (+ buffer).
+• Coarsens to 3km (using MEAN for all vars, including Precip).
+• Saves strictly matching the reference grid.
+• CHUNKING: Applied to TIME only. Spatial dims are unchunked (contiguous).
+"""
+
+from pathlib import Path
+import shutil
+import numpy as np
+import xarray as xr
+import zarr
+import dask.array as da
+from dask.distributed import Client
+from numcodecs import Blosc
+
+# ================= CONFIG =================
+YEAR_LIST = list(range(2000, 2013))
+
+AORC_BASE_DIR = Path("/scr/hyousefi/aorc")
+OUT_DIR = Path("/scr/hyousefi/corrdiff_datasets/paperdata")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# YOUR ARIZONA GRID
+AORC_3KM_GRID = Path("/home/hyousefi/data/AORC/aorc_reference_grids/aorc_refgrid_3km.nc")
+
+AORC_VARS = [
+    "APCP_surface", "DLWRF_surface", "DSWRF_surface", "PRES_surface",
+    "SPFH_2maboveground", "TMP_2maboveground", "UGRD_10maboveground", "VGRD_10maboveground",
+]
+
+# Chunking
+TIME_CHUNK_OUT = 240
+DTYPE = "float32"
+
+# ================= MAIN =================
+def build_arizona_subset():
+    client = Client()
+    print(f"Cluster started: {client.dashboard_link}")
+
+    # 1. ANALYZE ARIZONA GRID
+    print("Loading Arizona reference grid...")
+    ds_ref = xr.open_dataset(AORC_3KM_GRID)
+    
+    # Get Bounds
+    if "LAT2D" in ds_ref:
+        ref_lat = ds_ref["LAT2D"].values.astype(DTYPE)
+        ref_lon = ds_ref["LON2D"].values.astype(DTYPE)
+    else:
+        ref_lat = ds_ref["lat"].values.astype(DTYPE)
+        ref_lon = ds_ref["lon"].values.astype(DTYPE)
+
+    # Calculate the exact size we need
+    ny_tgt, nx_tgt = ref_lat.shape
+    
+    # We need exactly 3x this size from the 1km input
+    ny_req = ny_tgt * 3
+    nx_req = nx_tgt * 3
+
+    # Find the bounding box of Arizona
+    min_lat, max_lat = ref_lat.min(), ref_lat.max()
+    min_lon, max_lon = ref_lon.min(), ref_lon.max()
+
+    print(f"Target Arizona Grid: {ny_tgt}x{nx_tgt}")
+    print(f"Looking for 1km window of size: {ny_req}x{nx_req}")
+    print(f"Bounds: Lat [{min_lat:.2f}, {max_lat:.2f}], Lon [{min_lon:.2f}, {max_lon:.2f}]")
+
+    for year in YEAR_LIST:
+        print(f"\nProcessing {year}...")
+        in_root = AORC_BASE_DIR / f"{year}.zarr"
+        out_zarr = OUT_DIR / f"aorc_3km_{year}.zarr"
+
+        if out_zarr.exists():
+            shutil.rmtree(out_zarr)
+
+        # 2. FIND INDICES IN HUGE CONUS FILE
+        lat_in = zarr.open_array(str(in_root / "latitude"))[:]
+        lon_in = zarr.open_array(str(in_root / "longitude"))[:]
+
+        # Find closest index
+        iy_start = np.abs(lat_in - min_lat).argmin()
+        ix_start = np.abs(lon_in - min_lon).argmin()
+
+        # Check if we need to flip slicing direction (if lat is descending)
+        if lat_in[0] > lat_in[-1]: 
+             iy_start = np.abs(lat_in - max_lat).argmin()
+
+        print(f"  Slicing 1km Input at: y={iy_start}:{iy_start+ny_req}, x={ix_start}:{ix_start+nx_req}")
+
+        # 3. PROCESS VARIABLES
+        data_arrays = []
+        
+        for v in AORC_VARS:
+            arr = da.from_zarr(str(in_root / v))
+            
+            # CROP
+            arr_sub = arr[:, iy_start : iy_start + ny_req, ix_start : ix_start + nx_req]
+            
+            # RECHUNK: Time chunked, Spatial dimensions full (-1)
+            # This ensures the 3x3 coarsening has the full block in memory, preventing edge artifacts
+            arr_sub = arr_sub.rechunk({0: TIME_CHUNK_OUT, 1: -1, 2: -1})
+
+            da_var = xr.DataArray(arr_sub, dims=("time", "y", "x"), name=v)
+            
+            # COARSEN (Aggregating 3x3 -> 1 pixel)
+            da_3km = da_var.coarsen(y=3, x=3, boundary="trim").mean()
+            
+            data_arrays.append(da_3km.astype(DTYPE))
+
+        # 4. WRITE OUTPUT
+        ds = xr.Dataset()
+        combined = xr.concat(data_arrays, dim="channel")
+        ds["aorc"] = combined.transpose("time", "channel", "y", "x")
+
+        # --- FIX: FORCE TIME TO DATETIME OBJECTS ---
+        time_raw = da.from_zarr(str(in_root / "time"))
+        time_dates = time_raw.astype("datetime64[s]")
+
+        ds = ds.assign_coords({
+            "time": time_dates,
+            "lat": (("y", "x"), ref_lat),
+            "lon": (("y", "x"), ref_lon),
+            "aorc_variable": (("channel",), np.array(AORC_VARS, dtype="S64"))
+        })
+
+        compressor = Blosc(cname='lz4', clevel=5, shuffle=Blosc.SHUFFLE)
+        encoding = {"aorc": {"compressor": compressor}}
+
+        print("  Writing Zarr (Chunked by Time only)...")
+        # Chunk time and channel, but keep spatial dims contiguous (single chunk)
+        ds = ds.chunk({
+            "time": TIME_CHUNK_OUT, 
+            "channel": 8, 
+            "y": -1, 
+            "x": -1
+        })
+
+        ds.to_zarr(out_zarr, mode="w", encoding=encoding, compute=True)
+        print(f"✓ Finished {year}")
+
+if __name__ == "__main__":
+    build_arizona_subset()
+# %%
+# %%

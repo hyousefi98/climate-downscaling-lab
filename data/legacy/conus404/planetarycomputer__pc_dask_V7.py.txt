@@ -1,0 +1,161 @@
+# %%
+"""
+Full-year CONUS404 subset (single pass) using .sel(time=slice(...)) to avoid
+dtype comparison issues (works with datetime64 and cftime).
+
+- Computes coarse index slice once (fast).
+- Slices the full year in one go with .sel(time=slice(...)).
+- Optional fine bbox mask and rechunking.
+- Prints source/selected/written time ranges robustly.
+- Writes once to Zarr with compression + consolidated metadata.
+"""
+
+from pathlib import Path
+import shutil
+
+import dask
+import dask.array as da
+import xarray as xr
+from numcodecs import Zlib
+import planetary_computer as pc
+import pystac_client
+
+# ==================== CONFIG ====================
+START_DATE = "2005-06-01"     # inclusive
+END_DATE   = "2006-01-01"     # exclusive (we'll slice to END_DATE; typically no sample at exactly END_DATE)
+# If your dataset had a sample exactly at END_DATE, you can use END_DATE_EXCL = "2001-12-31T23:59:59.999999999"
+
+# Target bbox
+# TARGET_N, TARGET_S = 38.81, 29.48
+# TARGET_W, TARGET_E = -116.58, -107.25
+
+TARGET_N, TARGET_S = 40.5, 28
+TARGET_W, TARGET_E = -118, -105
+
+# Variables to fetch (skip missing gracefully)
+VARS = ["GLW", "SWDOWN", "PSFC", "Q2", "T2", "U10", "V10", "PREC_ACC_NC"]
+
+# Output
+OUT_PATH = Path(f"/scr/hyousefi/conus404/conus404_{START_DATE[:4]}_subset_AZ_2.zarr")
+
+# Options
+APPLY_FINE_MASK = False
+RECHUNK = {"time": 24}   # daily-ish; set {} to keep native
+
+dask.config.set(scheduler="threads")
+
+
+# ==================== HELPERS ====================
+def _time_range_str(obj, label="[time]"):
+    """Print first/last time without pandas; works for datetime64 or cftime."""
+    if "time" not in obj.coords:
+        print(f"{label} no 'time' coordinate.")
+        return
+    t = obj["time"]
+    if t.size == 0:
+        print(f"{label} time range: EMPTY")
+        return
+    t0 = t.isel(time=0).values
+    t1 = t.isel(time=-1).values
+    print(f"{label} time range: {t0} → {t1}  (n={t.size})")
+
+
+def _minmax_true_indices_1d(mask_da):
+    """Return (min_idx, max_idx) for a 1D boolean DataArray using dask."""
+    arr = mask_da.data  # dask array (1D)
+    idx = da.where(arr)[0]
+    return dask.compute(idx.min(), idx.max())
+
+
+# ==================== MAIN ====================
+def download_full_year():
+    try:
+        print("Connecting to Planetary Computer and opening CONUS404 dataset...")
+        cat = pystac_client.Client.open(
+            "https://planetarycomputer.microsoft.com/api/stac/v1",
+            modifier=pc.sign_inplace,
+        )
+        asset = cat.get_collection("conus404").assets["zarr-abfs"]
+
+        ds = xr.open_zarr(
+            asset.href,
+            storage_options=asset.extra_fields["xarray:storage_options"],
+            **asset.extra_fields["xarray:open_kwargs"],
+        )
+        print("Successfully opened dataset.")
+        _time_range_str(ds, "[SOURCE]")
+
+        # Keep only variables that exist
+        vars_exist = [v for v in VARS if v in ds.data_vars]
+        if not vars_exist:
+            raise ValueError("None of the requested variables are present in the dataset.")
+
+        # ---------- Spatial coarse slice (fast, index-based) ----------
+        print("Calculating coarse spatial index slice...")
+        valid_rows_mask = ((ds.lon >= TARGET_W) & (ds.lon <= TARGET_E)).any(dim="west_east")
+        valid_cols_mask = ((ds.lat >= TARGET_S) & (ds.lat <= TARGET_N)).any(dim="south_north")
+
+        row_min, row_max = _minmax_true_indices_1d(valid_rows_mask)
+        col_min, col_max = _minmax_true_indices_1d(valid_cols_mask)
+
+        index_slice = {
+            "south_north": slice(int(row_min), int(row_max) + 1),
+            "west_east":   slice(int(col_min), int(col_max) + 1),
+        }
+        ds_coarse = ds.isel(**index_slice)
+        print(
+            "Coarse indices determined:\n"
+            f"  south_north: {row_min}..{row_max}\n"
+            f"  west_east:   {col_min}..{col_max}"
+        )
+
+        # ---------- Full-year time slice (use .sel with slice to avoid dtype issues) ----------
+        # This handles datetime64 AND cftime safely.
+        ds_year = ds_coarse[vars_exist].sel(time=slice(START_DATE, END_DATE))
+
+        if ds_year.time.size == 0:
+            raise ValueError("No samples found in the requested time range.")
+        _time_range_str(ds_year, "[SELECTED]")
+
+        # ---------- Optional fine mask for exact bbox ----------
+        if APPLY_FINE_MASK:
+            print("Applying fine lat/lon mask within the coarse subset...")
+            m = (
+                (ds_year.lat >= TARGET_S) & (ds_year.lat <= TARGET_N) &
+                (ds_year.lon >= TARGET_W) & (ds_year.lon <= TARGET_E)
+            )
+            ds_year = ds_year.where(m, drop=True)
+            if ds_year.sizes.get("south_north", 0) == 0 or ds_year.sizes.get("west_east", 0) == 0:
+                raise ValueError("Fine mask removed all cells; adjust bbox or disable APPLY_FINE_MASK.")
+
+        # ---------- Optional rechunk ----------
+        if RECHUNK:
+            print(f"Rechunking with: {RECHUNK}")
+            ds_year = ds_year.chunk(RECHUNK)
+
+        # ---------- Write output ----------
+        if OUT_PATH.exists():
+            print(f"Output path exists, removing: {OUT_PATH}")
+            shutil.rmtree(OUT_PATH)
+
+        encoding = {v: {"compressor": Zlib(level=3)} for v in ds_year.data_vars}
+
+        print(f"Writing full-year dataset to Zarr: {OUT_PATH}")
+        ds_year.to_zarr(OUT_PATH, mode="w", encoding=encoding, consolidated=True)
+
+        # Verify by quick reopen
+        ds_check = xr.open_zarr(OUT_PATH, consolidated=True)
+        _time_range_str(ds_check, "[WRITTEN]")
+
+        print("Done.")
+
+    except Exception as e:
+        print("\n--- AN ERROR OCCURRED ---")
+        print(f"{type(e).__name__}: {e}")
+
+
+if __name__ == "__main__":
+    download_full_year()
+
+
+# %%
