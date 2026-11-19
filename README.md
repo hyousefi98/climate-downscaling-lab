@@ -1,4 +1,4 @@
-# Downscaling Gap
+# Climate Downscaling Lab
 
 Research code for **Synthetic benchmarks overstate the real-world skill of
 deep-learning climate downscaling**.
@@ -9,8 +9,7 @@ together. Shared operations have common implementations; scientifically
 different loss functions, samplers, and evaluation conventions remain explicit.
 
 **Code only:** no datasets, normalization outputs, checkpoints, predictions,
-figures, result tables, or manuscript files are distributed here. The repository
-is being prepared privately before publication. Small scientific tests and
+figures, result tables, or manuscript files are distributed here. Small scientific tests and
 real-checkpoint inference smoke tests are documented below; these do not amount
 to retraining every model or regenerating every result in the paper.
 
@@ -59,8 +58,8 @@ Use a separate Python environment. The research verification environment uses
 Python 3.10, PyTorch 2.8, Zarr 2, and the pinned PhysicsNeMo source below.
 
 ```bash
-git clone https://github.com/hyousefi98/downscaling-gap.git
-cd downscaling-gap
+git clone https://github.com/hyousefi98/climate-downscaling-lab.git
+cd climate-downscaling-lab
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip

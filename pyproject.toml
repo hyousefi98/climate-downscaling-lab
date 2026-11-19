@@ -3,7 +3,7 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "downscaling-gap"
+name = "climate-downscaling-lab"
 version = "0.1.0"
 description = "Code for synthetic and dynamical climate-downscaling benchmarks"
 readme = "README.md"
@@ -41,7 +41,7 @@ preprocess = ["cartopy>=0.24,<0.26", "shapely>=2,<3"]
 test = ["pytest>=8,<10", "scikit-learn>=1.7,<1.8", "joblib>=1.5,<2", "matplotlib>=3.10,<3.11", "hydra-core==1.3.2", "omegaconf==2.3.0"]
 
 [project.urls]
-Repository = "https://github.com/hyousefi98/downscaling-gap"
+Repository = "https://github.com/hyousefi98/climate-downscaling-lab"
 
 [tool.setuptools.packages.find]
 where = ["."]
